@@ -1,14 +1,18 @@
 {
-  "name": "react-native",
-  "version": "0.88.0",
-  "description": "A framework for building native apps using React",
+  "name": "@reactvision/react-native-visionos",
+  "version": "0.88.0-moyo.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "reactNativeUpstreamVersion": "0.88.0",
+  "description": "React Native for visionOS",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/react/react-native.git",
+    "url": "https://github.com/ReactVision/react-native-visionos.git",
     "directory": "packages/react-native"
   },
-  "homepage": "https://reactnative.dev/",
+  "homepage": "https://github.com/ReactVision/react-native-visionos#readme",
   "keywords": [
     "react",
     "react-native",
@@ -19,7 +23,7 @@
     "app-framework",
     "mobile-development"
   ],
-  "bugs": "https://github.com/react/react-native/issues",
+  "bugs": "https://github.com/ReactVision/react-native-visionos/issues",
   "engines": {
     "node": "^22.13.0 || ^24.3.0 || >= 26.0.0"
   },
@@ -138,7 +142,9 @@
     "!**/__flowtests__/**",
     "!**/__mocks__/**",
     "!**/__tests__/**",
-    "!**/__typetests__/**"
+    "!**/__typetests__/**",
+    "visionos_modules",
+    "local-cli/localCommands.js"
   ],
   "scripts": {
     "prepack": "node ./scripts/prepack.js",
@@ -216,6 +222,13 @@
         },
         "android": {},
         "jsSrcsDir": "src"
+      },
+      {
+        "name": "FBReactNativeSpec_visionOS",
+        "type": "modules",
+        "ios": {},
+        "android": {},
+        "jsSrcsDir": "visionos_modules"
       }
     ]
   }

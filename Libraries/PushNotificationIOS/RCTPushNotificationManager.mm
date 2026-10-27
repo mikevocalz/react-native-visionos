@@ -532,6 +532,7 @@ static inline NSDictionary *RCTSettingsDictForUNNotificationSettings(
 
 - (void)getInitialNotification:(RCTPromiseResolveBlock)resolve reject:(__unused RCTPromiseRejectBlock)reject
 {
+#if !TARGET_OS_VISION
   // The user actioned a local or remote notification to launch the app. Notification is represented by UNNotification.
   // Set this property in the implementation of
   // userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler.
@@ -551,6 +552,7 @@ static inline NSDictionary *RCTSettingsDictForUNNotificationSettings(
   }
 
   resolve((id)kCFNull);
+#endif
 }
 
 - (void)getScheduledLocalNotifications:(RCTResponseSenderBlock)callback

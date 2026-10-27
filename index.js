@@ -357,6 +357,12 @@ module.exports = {
   get Share() {
     return require('./Libraries/Share/Share').default;
   },
+  get XR() {
+    return require('./Libraries/XR/XR').default;
+  },
+  get WindowManager() {
+    return require('./Libraries/WindowManager/WindowManager').default;
+  },
   get StyleSheet() {
     return require('./Libraries/StyleSheet/StyleSheet').default;
   },

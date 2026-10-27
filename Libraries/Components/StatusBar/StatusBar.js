@@ -12,6 +12,7 @@ import type {EventSubscription} from '../../vendor/emitter/EventEmitter';
 
 import * as Appearance from '../../Utilities/Appearance';
 import Platform from '../../Utilities/Platform';
+import warnOnce from '../../Utilities/warnOnce';
 import NativeStatusBarManagerAndroid from './NativeStatusBarManagerAndroid';
 import NativeStatusBarManagerIOS from './NativeStatusBarManagerIOS';
 import * as React from 'react';
@@ -352,6 +353,13 @@ class StatusBar extends React.Component<StatusBarProps> {
   _stackEntry: ?StackProps = null;
 
   componentDidMount() {
+    if (Platform.isVision) {
+      warnOnce(
+        'StatusBar-unavailable',
+        'StatusBar is not available on visionOS platform.',
+      );
+      return;
+    }
     // Every time a StatusBar component is mounted, we push it's prop to a stack
     // and always update the native status bar with the props from the top of then
     // stack. This allows having multiple StatusBar components and the one that is

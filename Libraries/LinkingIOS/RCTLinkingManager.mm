@@ -16,6 +16,7 @@
 #import "RCTLinkingPlugins.h"
 
 static NSString *const kOpenURLNotification = @"RCTOpenURLNotification";
+static NSURL *initialURL = nil;
 
 @interface RCTLinkingManager () <NativeLinkingManagerSpec>
 
@@ -136,6 +137,16 @@ RCT_EXPORT_MODULE()
   return YES;
 }
 
+
++ (void)onOpenURL:(NSURL *)url
+{
+  if (initialURL == nil) {
+    initialURL = url;
+  } else {
+    postNotificationWithURL(url, self);
+  }
+}
+
 - (void)handleOpenURLNotification:(NSNotification *)notification
 {
   [self sendEventWithName:@"url" body:notification.userInfo];
@@ -206,6 +217,7 @@ RCT_EXPORT_MODULE()
 
 - (void)getInitialURL:(RCTPromiseResolveBlock)resolve reject:(__unused RCTPromiseRejectBlock)reject
 {
+#if !TARGET_OS_VISION
   NSURL *initialURL = nil;
   if (self.bridge.launchOptions[UIApplicationLaunchOptionsURLKey] != nullptr) {
     initialURL = self.bridge.launchOptions[UIApplicationLaunchOptionsURLKey];
@@ -216,6 +228,8 @@ RCT_EXPORT_MODULE()
       initialURL = ((NSUserActivity *)userActivityDictionary[@"UIApplicationLaunchOptionsUserActivityKey"]).webpageURL;
     }
   }
+#endif
+  // React Native visionOS uses static property to retrieve initialURL.
   resolve(RCTNullIfNil(initialURL.absoluteString));
 }
 

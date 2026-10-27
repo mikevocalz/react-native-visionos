@@ -44,7 +44,7 @@ function generateCode(
 ) {
   if (shouldSkipGenerationForFBReactNativeSpec(schemaInfo, platform)) {
     codegenLog(
-      '[Codegen - FBReactNativeSpec] Skipping iOS code generation for FBReactNativeSpec as it has been generated already.',
+      `[Codegen - FBReactNativeSpec] Skipping iOS code generation for ${schemaInfo.library.config.name} as it has been generated already.`,
       true,
     );
     return;
@@ -89,15 +89,17 @@ function shouldSkipGenerationForFBReactNativeSpec(
   schemaInfo /*: $FlowFixMe */,
   platform /*: string */,
 ) {
+  const libraryName = schemaInfo.library.config.name;
   if (
     platform !== 'ios' ||
-    schemaInfo.library.config.name !== 'FBReactNativeSpec'
+    (libraryName !== 'FBReactNativeSpec' &&
+      libraryName !== 'FBReactNativeSpec_visionOS')
   ) {
     return false;
   }
 
   const fbReactNativeSpecOutputPath =
-    CORE_LIBRARIES_WITH_OUTPUT_FOLDER.FBReactNativeSpec.ios;
+    CORE_LIBRARIES_WITH_OUTPUT_FOLDER[libraryName].ios;
   const fbReactNativeSpecAbsolutePath = path.resolve(
     fbReactNativeSpecOutputPath,
   );

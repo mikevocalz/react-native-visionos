@@ -1,0 +1,3242 @@
+diff -ruN -x p rn862/package/Libraries/AppDelegate/RCTAppDelegate.h vos/package/Libraries/AppDelegate/RCTAppDelegate.h
+--- rn862/package/Libraries/AppDelegate/RCTAppDelegate.h	1985-10-26 04:15:00
++++ vos/package/Libraries/AppDelegate/RCTAppDelegate.h	1985-10-26 04:15:00
+@@ -65,6 +65,8 @@
+ 
+ /// The window object, used to render the UViewControllers
+ @property (nonatomic, strong, nonnull) UIWindow *window;
++/// Store last focused window to properly handle multi-window scenarios
++@property (nonatomic, weak, nullable) UIWindow *lastFocusedWindow;
+ 
+ @property (nonatomic, nullable) RCTBridge *bridge
+     __attribute__((deprecated("The bridge is deprecated and will be removed when removing the legacy architecture.")));
+diff -ruN -x p rn862/package/Libraries/AppDelegate/RCTAppDelegate.mm vos/package/Libraries/AppDelegate/RCTAppDelegate.mm
+--- rn862/package/Libraries/AppDelegate/RCTAppDelegate.mm	1985-10-26 04:15:00
++++ vos/package/Libraries/AppDelegate/RCTAppDelegate.mm	1985-10-26 04:15:00
+@@ -42,13 +42,16 @@
+ {
+   self.reactNativeFactory = [[RCTReactNativeFactory alloc] initWithDelegate:self];
+ 
++#if !TARGET_OS_VISION
+   if (self.automaticallyLoadReactNativeWindow) {
+     [self loadReactNativeWindow:launchOptions];
+   }
++#endif
+ 
+   return YES;
+ }
+ 
++#if !TARGET_OS_VISION
+ - (void)loadReactNativeWindow:(NSDictionary *)launchOptions
+ {
+   UIView *rootView = [self.rootViewFactory viewWithModuleName:self.moduleName
+@@ -61,6 +64,7 @@
+   _window.rootViewController = rootViewController;
+   [_window makeKeyAndVisible];
+ }
++#endif
+ 
+ - (RCTRootViewFactory *)rootViewFactory
+ {
+diff -ruN -x p rn862/package/Libraries/AppDelegate/RCTRootViewFactory.mm vos/package/Libraries/AppDelegate/RCTRootViewFactory.mm
+--- rn862/package/Libraries/AppDelegate/RCTRootViewFactory.mm	1985-10-26 04:15:00
++++ vos/package/Libraries/AppDelegate/RCTRootViewFactory.mm	1985-10-26 04:15:00
+@@ -190,7 +190,7 @@
+   RCTSurfaceHostingProxyRootView *surfaceHostingProxyRootView =
+       [[RCTSurfaceHostingProxyRootView alloc] initWithSurface:surface];
+ 
+-#if TARGET_OS_TV
++#if TARGET_OS_TV || TARGET_OS_VISION
+   surfaceHostingProxyRootView.backgroundColor = [UIColor clearColor];
+ #else
+   surfaceHostingProxyRootView.backgroundColor = [UIColor systemBackgroundColor];
+@@ -211,10 +211,12 @@
+                            initProps:(NSDictionary *)initProps
+ {
+   UIView *rootView = RCTAppSetupDefaultRootView(bridge, moduleName, initProps, YES);
+-#if !TARGET_OS_TV
+-  rootView.backgroundColor = [UIColor systemBackgroundColor];
+-#else
++#if TARGET_OS_TV
+   rootView.backgroundColor = [UIColor blackColor];
++#elif TARGET_OS_VISION
++  rootView.backgroundColor = [UIColor clearColor];
++#else
++  rootView.backgroundColor = [UIColor systemBackgroundColor];
+ #endif
+   return rootView;
+ }
+diff -ruN -x p rn862/package/Libraries/Components/Keyboard/Keyboard.js vos/package/Libraries/Components/Keyboard/Keyboard.js
+--- rn862/package/Libraries/Components/Keyboard/Keyboard.js	1985-10-26 04:15:00
++++ vos/package/Libraries/Components/Keyboard/Keyboard.js	1985-10-26 04:15:00
+@@ -14,6 +14,7 @@
+ import LayoutAnimation from '../../LayoutAnimation/LayoutAnimation';
+ import dismissKeyboard from '../../Utilities/dismissKeyboard';
+ import Platform from '../../Utilities/Platform';
++import warnOnce from '../../Utilities/warnOnce';
+ import NativeKeyboardObserver from './NativeKeyboardObserver';
+ 
+ export type KeyboardEventName = keyof KeyboardEventDefinitions;
+@@ -114,6 +115,10 @@
+     );
+ 
+   constructor() {
++    if (Platform.isVision === true) {
++      return;
++    }
++
+     this.addListener('keyboardDidShow', ev => {
+       this._currentlyShowing = ev;
+     });
+@@ -151,6 +156,14 @@
+     listener: (...KeyboardEventDefinitions[K]) => unknown,
+     context?: unknown,
+   ): EventSubscription {
++    if (Platform.isVision === true) {
++      warnOnce(
++        'Keyboard-unavailable',
++        'Keyboard API is not available on visionOS platform. The system displays the keyboard in a separate window, leaving the app’s window unaffected by the keyboard’s appearance and disappearance',
++      );
++      return {remove() {}};
++    }
++
+     return this._emitter.addListener(eventType, listener);
+   }
+ 
+@@ -162,6 +175,10 @@
+   removeAllListeners<K extends keyof KeyboardEventDefinitions>(
+     eventType: ?K,
+   ): void {
++    if (Platform.isVision === true) {
++      return;
++    }
++
+     this._emitter.removeAllListeners(eventType);
+   }
+ 
+diff -ruN -x p rn862/package/Libraries/Components/Keyboard/KeyboardAvoidingView.js vos/package/Libraries/Components/Keyboard/KeyboardAvoidingView.js
+--- rn862/package/Libraries/Components/Keyboard/KeyboardAvoidingView.js	1985-10-26 04:15:00
++++ vos/package/Libraries/Components/Keyboard/KeyboardAvoidingView.js	1985-10-26 04:15:00
+@@ -19,6 +19,7 @@
+ import LayoutAnimation from '../../LayoutAnimation/LayoutAnimation';
+ import StyleSheet from '../../StyleSheet/StyleSheet';
+ import Platform from '../../Utilities/Platform';
++import warnOnce from '../../Utilities/warnOnce';
+ import {type EventSubscription} from '../../vendor/emitter/EventEmitter';
+ import AccessibilityInfo from '../AccessibilityInfo/AccessibilityInfo';
+ import View from '../View/View';
+@@ -196,6 +197,13 @@
+     }
+ 
+     if (Platform.OS === 'ios') {
++      if (Platform.isVision === true) {
++        warnOnce(
++          'KeyboardAvoidingView-unavailable',
++          'KeyboardAvoidingView is not available on visionOS platform. The system displays the keyboard in a separate window, leaving the app’s window unaffected by the keyboard’s appearance and disappearance',
++        );
++        return;
++      }
+       this._subscriptions = [
+         // When undocked, split or floating, iOS will emit
+         // UIKeyboardWillHideNotification notification.
+@@ -232,6 +240,16 @@
+       onLayout,
+       ...props
+     } = this.props;
++
++    if (Platform.isVision === true) {
++      // KeyboardAvoidingView is not supported on VisionOS, so we return a simple View without the onLayout handler
++      return (
++        <View ref={this.viewRef} style={style} {...props}>
++          {children}
++        </View>
++      );
++    }
++
+     const bottomHeight = enabled === true ? this.state.bottom : 0;
+     switch (behavior) {
+       case 'height':
+diff -ruN -x p rn862/package/Libraries/Components/ScrollView/ScrollView.js vos/package/Libraries/Components/ScrollView/ScrollView.js
+--- rn862/package/Libraries/Components/ScrollView/ScrollView.js	1985-10-26 04:15:00
++++ vos/package/Libraries/Components/ScrollView/ScrollView.js	1985-10-26 04:15:00
+@@ -794,22 +794,24 @@
+     this._keyboardMetrics = Keyboard.metrics();
+     this._additionalScrollOffset = 0;
+ 
+-    this._subscriptionKeyboardWillShow = Keyboard.addListener(
+-      'keyboardWillShow',
+-      this.scrollResponderKeyboardWillShow,
+-    );
+-    this._subscriptionKeyboardWillHide = Keyboard.addListener(
+-      'keyboardWillHide',
+-      this.scrollResponderKeyboardWillHide,
+-    );
+-    this._subscriptionKeyboardDidShow = Keyboard.addListener(
+-      'keyboardDidShow',
+-      this.scrollResponderKeyboardDidShow,
+-    );
+-    this._subscriptionKeyboardDidHide = Keyboard.addListener(
+-      'keyboardDidHide',
+-      this.scrollResponderKeyboardDidHide,
+-    );
++    if (Platform.isVision !== true) {
++      this._subscriptionKeyboardWillShow = Keyboard.addListener(
++        'keyboardWillShow',
++        this.scrollResponderKeyboardWillShow,
++      );
++      this._subscriptionKeyboardWillHide = Keyboard.addListener(
++        'keyboardWillHide',
++        this.scrollResponderKeyboardWillHide,
++      );
++      this._subscriptionKeyboardDidShow = Keyboard.addListener(
++        'keyboardDidShow',
++        this.scrollResponderKeyboardDidShow,
++      );
++      this._subscriptionKeyboardDidHide = Keyboard.addListener(
++        'keyboardDidHide',
++        this.scrollResponderKeyboardDidHide,
++      );
++    }
+ 
+     this._updateAnimatedNodeAttachment();
+   }
+diff -ruN -x p rn862/package/Libraries/Components/StatusBar/StatusBar.js vos/package/Libraries/Components/StatusBar/StatusBar.js
+--- rn862/package/Libraries/Components/StatusBar/StatusBar.js	1985-10-26 04:15:00
++++ vos/package/Libraries/Components/StatusBar/StatusBar.js	1985-10-26 04:15:00
+@@ -12,6 +12,7 @@
+ 
+ import processColor from '../../StyleSheet/processColor';
+ import Platform from '../../Utilities/Platform';
++import warnOnce from '../../Utilities/warnOnce';
+ import NativeStatusBarManagerAndroid from './NativeStatusBarManagerAndroid';
+ import NativeStatusBarManagerIOS from './NativeStatusBarManagerIOS';
+ import invariant from 'invariant';
+@@ -402,6 +403,13 @@
+   _stackEntry: ?StackProps = null;
+ 
+   componentDidMount() {
++    if (Platform.isVision) {
++      warnOnce(
++        'StatusBar-unavailable',
++        'StatusBar is not available on visionOS platform.',
++      );
++      return;
++    }
+     // Every time a StatusBar component is mounted, we push it's prop to a stack
+     // and always update the native status bar with the props from the top of then
+     // stack. This allows having multiple StatusBar components and the one that is
+diff -ruN -x p rn862/package/Libraries/Components/TextInput/InputAccessoryView.js vos/package/Libraries/Components/TextInput/InputAccessoryView.js
+--- rn862/package/Libraries/Components/TextInput/InputAccessoryView.js	1985-10-26 04:15:00
++++ vos/package/Libraries/Components/TextInput/InputAccessoryView.js	1985-10-26 04:15:00
+@@ -92,7 +92,7 @@
+ ) => {
+   const {width} = useWindowDimensions();
+ 
+-  if (Platform.OS === 'ios') {
++  if (Platform.OS === 'ios' && !Platform.isVision) {
+     if (React.Children.count(props.children) === 0) {
+       return null;
+     }
+diff -ruN -x p rn862/package/Libraries/LinkingIOS/RCTLinkingManager.h vos/package/Libraries/LinkingIOS/RCTLinkingManager.h
+--- rn862/package/Libraries/LinkingIOS/RCTLinkingManager.h	1985-10-26 04:15:00
++++ vos/package/Libraries/LinkingIOS/RCTLinkingManager.h	1985-10-26 04:15:00
+@@ -24,4 +24,6 @@
+     continueUserActivity:(nonnull NSUserActivity *)userActivity
+       restorationHandler:(nonnull void (^)(NSArray<id<UIUserActivityRestoring>> *_Nullable))restorationHandler;
+ 
+++ (void)onOpenURL:(nonnull NSURL *)url NS_SWIFT_NAME(onOpenURL(url:));
++
+ @end
+diff -ruN -x p rn862/package/Libraries/LinkingIOS/RCTLinkingManager.mm vos/package/Libraries/LinkingIOS/RCTLinkingManager.mm
+--- rn862/package/Libraries/LinkingIOS/RCTLinkingManager.mm	1985-10-26 04:15:00
++++ vos/package/Libraries/LinkingIOS/RCTLinkingManager.mm	1985-10-26 04:15:00
+@@ -15,6 +15,7 @@
+ #import "RCTLinkingPlugins.h"
+ 
+ static NSString *const kOpenURLNotification = @"RCTOpenURLNotification";
++static NSURL *initialURL = nil;
+ 
+ static void postNotificationWithURL(NSURL *URL, id sender)
+ {
+@@ -82,6 +83,16 @@
+   return YES;
+ }
+ 
++
+++ (void)onOpenURL:(NSURL *)url
++{
++  if (initialURL == nil) {
++    initialURL = url;
++  } else {
++    postNotificationWithURL(url, self);
++  }
++}
++
+ - (void)handleOpenURLNotification:(NSNotification *)notification
+ {
+   [self sendEventWithName:@"url" body:notification.userInfo];
+@@ -150,6 +161,7 @@
+ 
+ RCT_EXPORT_METHOD(getInitialURL : (RCTPromiseResolveBlock)resolve reject : (__unused RCTPromiseRejectBlock)reject)
+ {
++#if !TARGET_OS_VISION
+   NSURL *initialURL = nil;
+   if (self.bridge.launchOptions[UIApplicationLaunchOptionsURLKey] != nullptr) {
+     initialURL = self.bridge.launchOptions[UIApplicationLaunchOptionsURLKey];
+@@ -160,6 +172,8 @@
+       initialURL = ((NSUserActivity *)userActivityDictionary[@"UIApplicationLaunchOptionsUserActivityKey"]).webpageURL;
+     }
+   }
++#endif
++  // React Native visionOS uses static property to retrieve initialURL.
+   resolve(RCTNullIfNil(initialURL.absoluteString));
+ }
+ 
+diff -ruN -x p rn862/package/Libraries/PushNotificationIOS/RCTPushNotificationManager.mm vos/package/Libraries/PushNotificationIOS/RCTPushNotificationManager.mm
+--- rn862/package/Libraries/PushNotificationIOS/RCTPushNotificationManager.mm	1985-10-26 04:15:00
++++ vos/package/Libraries/PushNotificationIOS/RCTPushNotificationManager.mm	1985-10-26 04:15:00
+@@ -521,6 +521,7 @@
+ RCT_EXPORT_METHOD(
+     getInitialNotification : (RCTPromiseResolveBlock)resolve reject : (__unused RCTPromiseRejectBlock)reject)
+ {
++#if !TARGET_OS_VISION
+   // The user actioned a local or remote notification to launch the app. Notification is represented by UNNotification.
+   // Set this property in the implementation of
+   // userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler.
+@@ -540,6 +541,7 @@
+   }
+ 
+   resolve((id)kCFNull);
++#endif
+ }
+ 
+ RCT_EXPORT_METHOD(getScheduledLocalNotifications : (RCTResponseSenderBlock)callback)
+diff -ruN -x p rn862/package/Libraries/SwiftExtensions/RCTMainWindow.swift vos/package/Libraries/SwiftExtensions/RCTMainWindow.swift
+--- rn862/package/Libraries/SwiftExtensions/RCTMainWindow.swift	1969-12-31 19:00:00
++++ vos/package/Libraries/SwiftExtensions/RCTMainWindow.swift	1985-10-26 04:15:00
+@@ -0,0 +1,140 @@
++// `openWindow` and `dismissWindow` are iOS 17 / visionOS 1 APIs and this
++// scene only exists on visionOS, so the whole file compiles out elsewhere.
++#if os(visionOS)
++
++import SwiftUI
++
++/**
++ This SwiftUI struct returns main React Native scene. It should be used only once as it conains setup code.
++ 
++ Example:
++ ```swift
++ @main
++ struct YourApp: App {
++   @UIApplicationDelegateAdaptor var delegate: AppDelegate
++   
++   var body: some Scene {
++     RCTMainWindow(moduleName: "YourApp")
++   }
++ }
++ ```
++ 
++ Note: If you want to create additional windows in your app, use `RCTWindow()`.
++ */
++public struct RCTMainWindow: Scene {
++  var moduleName: String
++  var initialProps: RCTRootViewRepresentable.InitialPropsType
++  var onOpenURLCallback: ((URL) -> ())?
++  var devMenuSceneAnchor: UnitPoint?
++  var contentView: AnyView?
++  
++  var rootView: RCTRootViewRepresentable {
++    RCTRootViewRepresentable(moduleName: moduleName, initialProps: initialProps, devMenuSceneAnchor: devMenuSceneAnchor)
++  }
++
++  /// Creates new RCTMainWindowWindow.
++  ///
++  /// - Parameters:
++  ///   - moduleName: Name of the module registered using `AppRegistry.registerComponent()`
++  ///   - initialProps: Initial properties for this view.
++  ///   - devMenuPlacement: Placement of the additional controls for triggering reload command and dev menu trigger.
++  public init(
++    moduleName: String,
++    initialProps: RCTRootViewRepresentable.InitialPropsType = nil,
++    devMenuSceneAnchor: UnitPoint? = .bottom
++  ) {
++    self.moduleName = moduleName
++    self.initialProps = initialProps
++    self.devMenuSceneAnchor = devMenuSceneAnchor
++    self.contentView = AnyView(rootView)
++  }
++  
++  /// Creates new RCTMainWindowWindow.
++  ///
++  /// - Parameters:
++  ///   - moduleName: Name of the module registered using `AppRegistry.registerComponent()`
++  ///   - initialProps: Initial properties for this view.
++  ///   - devMenuPlacement: Placement of the additional controls for triggering reload command and dev menu trigger.
++  ///   - contentView: Closure which accepts rootView, allows to apply additional modifiers to React Native rootView.
++  public init<Content: View>(
++    moduleName: String,
++    initialProps: RCTRootViewRepresentable.InitialPropsType = nil,
++    devMenuSceneAnchor: UnitPoint? = .bottom,
++    @ViewBuilder contentView: @escaping (_ view: RCTRootViewRepresentable) -> Content
++  ) {
++    self.moduleName = moduleName
++    self.initialProps = initialProps
++    self.devMenuSceneAnchor = devMenuSceneAnchor
++    self.contentView = AnyView(contentView(rootView))
++  }
++  
++  public var body: some Scene {
++    WindowGroup {
++      contentView
++        .modifier(WindowHandlingModifier())
++        .onOpenURL(perform: { url in
++          onOpenURLCallback?(url)
++        })
++    }
++  }
++}
++
++extension RCTMainWindow {
++  public func onOpenURL(perform action: @escaping (URL) -> ()) -> Self {
++    var scene = self
++    scene.onOpenURLCallback = action
++    return scene
++  }
++}
++
++/**
++ Handles data sharing between React Native and SwiftUI views.
++ */
++public struct WindowHandlingModifier: ViewModifier {
++  typealias UserInfoType = Dictionary<String, AnyHashable>
++  
++  @Environment(\.reactContext) private var reactContext
++  @Environment(\.openWindow) private var openWindow
++  @Environment(\.dismissWindow) private var dismissWindow
++  @Environment(\.supportsMultipleWindows) private var supportsMultipleWindows
++  
++  public init() {}
++  
++  public func body(content: Content) -> some View {
++    // Attach listeners only if app supports multiple windows
++    if supportsMultipleWindows {
++      content
++        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RCTOpenWindow"))) { data in
++          guard let id = data.userInfo?["id"] as? String else { return }
++          reactContext.scenes.updateValue(RCTSceneData(id: id, props: data.userInfo?["userInfo"] as? UserInfoType), forKey: id)
++          openWindow(id: id)
++        }
++        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RCTUpdateWindow"))) { data in
++          guard
++            let id = data.userInfo?["id"] as? String,
++            let userInfo = data.userInfo?["userInfo"] as? UserInfoType else { return }
++          reactContext.scenes[id]?.props = userInfo
++        }
++        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RCTDismissWindow"))) { data in
++          guard let id = data.userInfo?["id"] as? String else { return }
++          dismissWindow(id: id)
++          reactContext.scenes.removeValue(forKey: id)
++        }
++        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RCTOpenImmersiveSpace"))) { data in
++          guard let id = data.userInfo?["id"] as? String else { return }
++          reactContext.scenes.updateValue(
++            RCTSceneData(id: id, props: data.userInfo?["userInfo"] as? UserInfoType),
++            forKey: id
++          )
++        }
++        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RCTDismissImmersiveSpace"))) { data in
++          guard let id = data.userInfo?["id"] as? String else { return }
++          reactContext.scenes.removeValue(forKey: id)
++        }
++    } else {
++      content
++    }
++  }
++}
++
++#endif // os(visionOS)
+diff -ruN -x p rn862/package/Libraries/SwiftExtensions/RCTReactContext.swift vos/package/Libraries/SwiftExtensions/RCTReactContext.swift
+--- rn862/package/Libraries/SwiftExtensions/RCTReactContext.swift	1969-12-31 19:00:00
++++ vos/package/Libraries/SwiftExtensions/RCTReactContext.swift	1985-10-26 04:15:00
+@@ -0,0 +1,51 @@
++// The Observation framework and the `@Observable` macro require
++// iOS 17 / visionOS 1.
++#if os(visionOS)
++
++import SwiftUI
++import Observation
++
++@Observable
++public class RCTSceneData: Identifiable {
++  public var id: String
++  public var props: Dictionary<String, AnyHashable>?
++  
++  init(id: String, props: Dictionary<String, AnyHashable>?) {
++    self.id = id
++    self.props = props
++  }
++}
++
++extension RCTSceneData: Equatable {
++  public static func == (lhs: RCTSceneData, rhs: RCTSceneData) -> Bool {
++    lhs.id == rhs.id && NSDictionary(dictionary: lhs.props ?? [:]).isEqual(to: rhs.props ?? [:])
++  }
++}
++
++@Observable
++public class RCTReactContext {
++  public var scenes: Dictionary<String, RCTSceneData> = [:]
++  
++  public func getSceneData(id: String) -> RCTSceneData? {
++    return scenes[id]
++  }
++}
++
++extension RCTReactContext: Equatable {
++  public static func == (lhs: RCTReactContext, rhs: RCTReactContext) -> Bool {
++    NSDictionary(dictionary: lhs.scenes).isEqual(to: rhs.scenes)
++  }
++}
++
++public extension EnvironmentValues {
++  var reactContext: RCTReactContext {
++    get { self[RCTSceneContextKey.self] }
++    set { self[RCTSceneContextKey.self] = newValue }
++  }
++}
++
++private struct RCTSceneContextKey: EnvironmentKey {
++  static var defaultValue: RCTReactContext = RCTReactContext()
++}
++
++#endif // os(visionOS)
+diff -ruN -x p rn862/package/Libraries/SwiftExtensions/RCTReactViewController.h vos/package/Libraries/SwiftExtensions/RCTReactViewController.h
+--- rn862/package/Libraries/SwiftExtensions/RCTReactViewController.h	1969-12-31 19:00:00
++++ vos/package/Libraries/SwiftExtensions/RCTReactViewController.h	1985-10-26 04:15:00
+@@ -0,0 +1,18 @@
++#import <UIKit/UIKit.h>
++
++/**
++  A `UIViewController` responsible for embeding `RCTRootView` inside. Uses Factory pattern to retrive new view instances.
++ 
++  Note: Used to in `RCTRootViewRepresentable` to display React views.
++ */
++@interface RCTReactViewController : UIViewController
++
++@property (nonatomic, strong, nonnull) NSString *moduleName;
++@property (nonatomic, strong, nullable) NSDictionary *initialProps;
++
++- (instancetype _Nonnull)initWithModuleName:(NSString *_Nonnull)moduleName
++                                   initProps:(NSDictionary *_Nullable)initProps;
++
++-(void)updateProps:(NSDictionary *_Nullable)newProps;
++
++@end
+diff -ruN -x p rn862/package/Libraries/SwiftExtensions/RCTReactViewController.m vos/package/Libraries/SwiftExtensions/RCTReactViewController.m
+--- rn862/package/Libraries/SwiftExtensions/RCTReactViewController.m	1969-12-31 19:00:00
++++ vos/package/Libraries/SwiftExtensions/RCTReactViewController.m	1985-10-26 04:15:00
+@@ -0,0 +1,75 @@
++#import "RCTReactViewController.h"
++#import <React/RCTConstants.h>
++#import <React/RCTUtils.h>
++#import <React/RCTRootView.h>
++#import <React-RCTAppDelegate/RCTAppDelegate.h>
++
++@protocol RCTRootViewFactoryProtocol <NSObject>
++
++- (UIView *)viewWithModuleName:(NSString *)moduleName initialProperties:(NSDictionary*)initialProperties launchOptions:(NSDictionary*)launchOptions;
++
++@end
++
++@protocol RCTFocusedWindowProtocol <NSObject>
++
++@property (nonatomic, nullable) UIWindow *lastFocusedWindow;
++
++@end
++
++@implementation RCTReactViewController
++
++- (instancetype)initWithModuleName:(NSString *)moduleName initProps:(NSDictionary *)initProps {
++    if (self = [super init]) {
++        _moduleName = moduleName;
++        _initialProps = initProps;
++    }
++    return self;
++}
++
++- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
++  [[NSNotificationCenter defaultCenter] postNotificationName:RCTWindowFrameDidChangeNotification object:self];
++}
++
++- (void)loadView {
++  RCTAppDelegate * appDelegate = (RCTAppDelegate *)[UIApplication sharedApplication].delegate;
++    if ([appDelegate respondsToSelector:@selector(rootViewFactory)]) {
++        self.view = [appDelegate.rootViewFactory viewWithModuleName:_moduleName initialProperties:_initialProps];
++    } else {
++        [NSException raise:@"UIApplicationDelegate:viewWithModuleName:initialProperties:launchOptions: not implemented"
++                    format:@"Make sure you subclass RCTAppDelegate"];
++    }
++}
++
++- (void)viewDidLoad {
++  UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapGesture:)];
++  [self.view addGestureRecognizer:tapGesture];
++}
++
++- (void)tapGesture:(UITapGestureRecognizer*)recognizer {
++  id<RCTFocusedWindowProtocol> appDelegate = (id<RCTFocusedWindowProtocol>)RCTSharedApplication().delegate;
++  
++  if (![appDelegate respondsToSelector:@selector(lastFocusedWindow)]) {
++    return;
++  }
++  
++  UIWindow *targetWindow = recognizer.view.window;
++  if (targetWindow != appDelegate.lastFocusedWindow) {
++    appDelegate.lastFocusedWindow = targetWindow;
++  }
++}
++
++- (void)updateProps:(NSDictionary *)newProps {
++  RCTRootView *rootView = (RCTRootView *)self.view;
++  if (rootView.appProperties == newProps) {
++    return;
++  }
++  
++  
++  
++  if (newProps != nil && ![rootView.appProperties isEqualToDictionary:newProps]) {
++    NSMutableDictionary *newProperties = [rootView.appProperties mutableCopy];
++    [newProperties setValuesForKeysWithDictionary:newProps];
++    [rootView setAppProperties:newProperties];
++  }
++}
++@end
+diff -ruN -x p rn862/package/Libraries/SwiftExtensions/RCTRootViewRepresentable.swift vos/package/Libraries/SwiftExtensions/RCTRootViewRepresentable.swift
+--- rn862/package/Libraries/SwiftExtensions/RCTRootViewRepresentable.swift	1969-12-31 19:00:00
++++ vos/package/Libraries/SwiftExtensions/RCTRootViewRepresentable.swift	1985-10-26 04:15:00
+@@ -0,0 +1,79 @@
++// `UIHostingOrnament`, `UIViewController.ornaments` and
++// `glassBackgroundEffect()` are visionOS-only.
++#if os(visionOS)
++
++import SwiftUI
++import React
++
++/**
++ SwiftUI view enclosing `RCTReactViewController`. Its main purpose is to display React Native views inside of SwiftUI lifecycle.
++
++ Use it create new windows in your app:
++ Example:
++ ```swift
++  WindowGroup {
++    RCTRootViewRepresentable(moduleName: "YourAppName")
++  }
++ ```
++*/
++public struct RCTRootViewRepresentable: UIViewControllerRepresentable {
++  public typealias InitialPropsType = [AnyHashable: Any]?
++  
++  var moduleName: String
++  var initialProps: InitialPropsType
++  var devMenuSceneAnchor: UnitPoint?
++  
++  public init(
++    moduleName: String,
++    initialProps: InitialPropsType = nil,
++    devMenuSceneAnchor: UnitPoint? = .bottom
++  ) {
++    self.moduleName = moduleName
++    self.initialProps = initialProps
++    self.devMenuSceneAnchor = devMenuSceneAnchor
++  }
++  
++  public func makeUIViewController(context: Context) -> RCTReactViewController {
++    let viewController = RCTReactViewController(moduleName: moduleName, initProps: initialProps)
++#if DEBUG
++    if let devMenuSceneAnchor {
++      let ornament = UIHostingOrnament(sceneAnchor: devMenuSceneAnchor) {
++        DevMenuView()
++      }
++      viewController.ornaments.append(ornament)
++    }
++#endif
++    return viewController
++  }
++  
++  public func updateUIViewController(_ uiViewController: RCTReactViewController, context: Context) {
++    uiViewController.updateProps(initialProps)
++  }
++}
++
++/**
++ Toolbar which displays additional controls to easily open dev menu and trigger reload command.
++ */
++struct DevMenuView: View {
++  var body: some View {
++    HStack {
++      Button(action: {
++        RCTTriggerReloadCommandListeners("User Reload")
++      }, label: {
++        Image(systemName: "arrow.clockwise")
++      })
++      Button(action: {
++        NotificationCenter.default.post(
++          Notification(name: Notification.Name("RCTShowDevMenuNotification"), object: nil)
++        )
++      },
++             label: {
++        Image(systemName: "filemenu.and.selection")
++      })
++    }
++    .padding()
++    .glassBackgroundEffect()
++  }
++}
++
++#endif // os(visionOS)
+diff -ruN -x p rn862/package/Libraries/SwiftExtensions/RCTWindow.swift vos/package/Libraries/SwiftExtensions/RCTWindow.swift
+--- rn862/package/Libraries/SwiftExtensions/RCTWindow.swift	1969-12-31 19:00:00
++++ vos/package/Libraries/SwiftExtensions/RCTWindow.swift	1985-10-26 04:15:00
+@@ -0,0 +1,103 @@
++// `WindowGroup(id:)` needs iOS 16 and additional scenes only exist on
++// visionOS, so the whole file compiles out elsewhere.
++#if os(visionOS)
++
++import SwiftUI
++import React
++
++/**
++ `RCTWindow` is a SwiftUI struct that returns additional scenes.
++ 
++ Example usage:
++ ```
++ RCTWindow(id: "SecondWindow", sceneData: reactContext.getSceneData(id: "SecondWindow"))
++ ```
++ */
++public struct RCTWindow : Scene {
++  var id: String
++  var sceneData: RCTSceneData?
++  var moduleName: String
++  var contentView: AnyView?
++
++  func getRootView(sceneData: RCTSceneData?) -> RCTRootViewRepresentable {
++    return RCTRootViewRepresentable(moduleName: moduleName, initialProps: sceneData?.props ?? [:], devMenuSceneAnchor: nil)
++  }
++  
++  public var body: some Scene {
++    WindowGroup(id: id) {
++      Group {
++        contentView
++      }
++      .onAppear {
++        if sceneData == nil {
++          RCTFatal(RCTErrorWithMessage("Passed scene data is nil, make sure to pass sceneContext to RCTWindow() in App.swift"))
++        }
++      }
++    }
++  }
++}
++
++extension RCTWindow {
++  /// Creates new RCTWindow.
++  ///
++  /// - Parameters:
++  ///   - id: Unique identifier of the window.
++  ///   - moduleName: Name of the module registered using `AppRegistry.registerComponent()`
++  ///   - sceneData: Data of the scene. Used to sync JS state between windows.
++  public init(id: String, moduleName: String, sceneData: RCTSceneData?) {
++    self.id = id
++    self.moduleName = moduleName
++    self.sceneData = sceneData
++    self.contentView = AnyView(getRootView(sceneData: sceneData))
++  }
++  
++  /// Creates new RCTWindow with additional closure to allow applying modifiers to rootView.
++  ///
++  /// - Parameters:
++  ///   - id: Unique identifier of the window.
++  ///   - moduleName: Name of the module registered using `AppRegistry.registerComponent()`
++  ///   - sceneData: Data of the scene. Used to sync JS state between windows.
++  ///   - contentView: Closure which accepts rootView, allows to apply additional modifiers to React Native rootView.
++  public init<Content: View>(
++    id: String,
++    moduleName: String,
++    sceneData: RCTSceneData?,
++    @ViewBuilder contentView: @escaping (_ view: RCTRootViewRepresentable) -> Content
++  ) {
++    self.id = id
++    self.moduleName = moduleName
++    self.sceneData = sceneData
++    self.contentView = AnyView(contentView(getRootView(sceneData: sceneData)))
++  }
++  
++  /// Creates new RCTWindow with additional closure to allow applying modifiers to rootView.
++  ///
++  /// - Parameters:
++  ///   - id: Unique identifier of the window. Same id will be used for moduleName.
++  ///   - sceneData: Data of the scene. Used to sync JS state between windows.
++  ///   - contentView: Closure which accepts rootView, allows to apply additional modifiers to React Native rootView.
++  public init<Content: View>(
++    id: String,
++    sceneData: RCTSceneData?,
++    @ViewBuilder contentView: @escaping (_ view: RCTRootViewRepresentable) -> Content
++  ) {
++    self.id = id
++    self.moduleName = id
++    self.sceneData = sceneData
++    self.contentView = AnyView(contentView(getRootView(sceneData: sceneData)))
++  }
++  
++  /// Creates new RCTWindow.
++  ///
++  /// - Parameters:
++  ///   - id: Unique identifier of the window. Same id will be used for moduleName.
++  ///   - sceneData: Data of the scene. Used to sync JS state between windows.
++  public init(id: String, sceneData: RCTSceneData?) {
++    self.id = id
++    self.moduleName = id
++    self.sceneData = sceneData
++    self.contentView = AnyView(getRootView(sceneData: sceneData))
++  }
++}
++
++#endif // os(visionOS)
+diff -ruN -x p rn862/package/Libraries/SwiftExtensions/React-RCTSwiftExtensions.podspec vos/package/Libraries/SwiftExtensions/React-RCTSwiftExtensions.podspec
+--- rn862/package/Libraries/SwiftExtensions/React-RCTSwiftExtensions.podspec	1969-12-31 19:00:00
++++ vos/package/Libraries/SwiftExtensions/React-RCTSwiftExtensions.podspec	1985-10-26 04:15:00
+@@ -0,0 +1,29 @@
++require "json"
++
++package = JSON.parse(File.read(File.join(__dir__, "..", "..", "package.json")))
++version = package['version']
++
++source = { :git => 'https://github.com/facebook/react-native.git' }
++if version == '1000.0.0'
++  # This is an unpublished version, use the latest commit hash of the react-native repo, which we’re presumably in.
++  source[:commit] = `git rev-parse HEAD`.strip if system("git rev-parse --git-dir > /dev/null 2>&1")
++else
++  source[:tag] = "v#{version}"
++end
++
++Pod::Spec.new do |s|
++  s.name                   = "React-RCTSwiftExtensions"
++  s.version                = version
++  s.summary                = "A library for easier React Native integration with SwiftUI."
++  s.homepage               = "https://reactnative.dev/"
++  s.license                = package["license"]
++  s.author                 = "Callstack"
++  s.platforms              = min_supported_versions
++  s.source                 = source
++  s.source_files           = "*.{swift,h,m}"
++  s.frameworks = ["UIKit", "SwiftUI"]
++
++  s.dependency "React-Core"
++  s.dependency "React-RCTXR" 
++  s.dependency "React-RCTWindowManager" 
++end
+diff -ruN -x p rn862/package/Libraries/Text/Text/RCTTextView.mm vos/package/Libraries/Text/Text/RCTTextView.mm
+--- rn862/package/Libraries/Text/Text/RCTTextView.mm	1985-10-26 04:15:00
++++ vos/package/Libraries/Text/Text/RCTTextView.mm	1985-10-26 04:15:00
+@@ -249,6 +249,7 @@
+       [_editMenuInteraction presentEditMenuWithConfiguration:config];
+     }
+   } else {
++#if !TARGET_OS_VISION
+     UIMenuController *menuController = [UIMenuController sharedMenuController];
+ 
+     if (menuController.isMenuVisible) {
+@@ -256,6 +257,7 @@
+     }
+ 
+     [menuController showMenuFromView:self rect:self.bounds];
++#endif
+   }
+ }
+ 
+diff -ruN -x p rn862/package/Libraries/Text/TextInput/RCTBaseTextInputView.mm vos/package/Libraries/Text/TextInput/RCTBaseTextInputView.mm
+--- rn862/package/Libraries/Text/TextInput/RCTBaseTextInputView.mm	1985-10-26 04:15:00
++++ vos/package/Libraries/Text/TextInput/RCTBaseTextInputView.mm	1985-10-26 04:15:00
+@@ -690,6 +690,7 @@
+ 
+ - (void)setCustomInputAccessoryViewWithNativeID:(NSString *)nativeID
+ {
++#if !TARGET_OS_VISION
+   __weak RCTBaseTextInputView *weakSelf = self;
+   [_bridge.uiManager rootViewForReactTag:self.reactTag
+                           withCompletion:^(UIView *rootView) {
+@@ -704,6 +705,7 @@
+                               }
+                             }
+                           }];
++#endif
+ }
+ 
+ - (NSString *)returnKeyTypeToString:(UIReturnKeyType)returnKeyType
+@@ -753,6 +755,7 @@
+ 
+ - (void)setDefaultInputAccessoryView
+ {
++#if !TARGET_OS_VISION
+   UIView<RCTBackedTextInputViewProtocol> *textInputView = self.backedTextInputView;
+   UIKeyboardType keyboardType = textInputView.keyboardType;
+   NSString *inputAccessoryViewButtonLabel = textInputView.inputAccessoryViewButtonLabel;
+@@ -794,6 +797,7 @@
+     textInputView.inputAccessoryView = nil;
+   }
+   [self reloadInputViewsIfNecessary];
++#endif
+ }
+ 
+ - (void)reloadInputViewsIfNecessary
+diff -ruN -x p rn862/package/Libraries/WindowManager/NativeWindowManager.js vos/package/Libraries/WindowManager/NativeWindowManager.js
+--- rn862/package/Libraries/WindowManager/NativeWindowManager.js	1969-12-31 19:00:00
++++ vos/package/Libraries/WindowManager/NativeWindowManager.js	1985-10-26 04:15:00
+@@ -0,0 +1,9 @@
++/**
++ * @flow strict
++ * @format
++ */
++
++import NativeWindowManager from '../../visionos_modules/NativeWindowManager';
++
++export * from '../../visionos_modules/NativeWindowManager';
++export default NativeWindowManager;
+diff -ruN -x p rn862/package/Libraries/WindowManager/RCTWindowManager.h vos/package/Libraries/WindowManager/RCTWindowManager.h
+--- rn862/package/Libraries/WindowManager/RCTWindowManager.h	1969-12-31 19:00:00
++++ vos/package/Libraries/WindowManager/RCTWindowManager.h	1985-10-26 04:15:00
+@@ -0,0 +1,6 @@
++#import <Foundation/Foundation.h>
++#import <React/RCTBridgeModule.h>
++
++@interface RCTWindowManager : NSObject <RCTBridgeModule>
++
++@end
+diff -ruN -x p rn862/package/Libraries/WindowManager/RCTWindowManager.mm vos/package/Libraries/WindowManager/RCTWindowManager.mm
+--- rn862/package/Libraries/WindowManager/RCTWindowManager.mm	1969-12-31 19:00:00
++++ vos/package/Libraries/WindowManager/RCTWindowManager.mm	1985-10-26 04:15:00
+@@ -0,0 +1,90 @@
++#import <React/RCTWindowManager.h>
++
++#import <FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS.h>
++
++#import <React/RCTBridge.h>
++#import <React/RCTConvert.h>
++#import <React/RCTUtils.h>
++
++// Events
++static NSString *const RCTOpenWindow = @"RCTOpenWindow";
++static NSString *const RCTDismissWindow = @"RCTDismissWindow";
++static NSString *const RCTUpdateWindow = @"RCTUpdateWindow";
++
++@interface RCTWindowManager () <NativeWindowManagerSpec>
++@end
++
++@implementation RCTWindowManager
++
++RCT_EXPORT_MODULE(WindowManager)
++
++RCT_EXPORT_METHOD(openWindow
++                  : (NSString *)windowId userInfo
++                  : (NSDictionary *)userInfo resolve
++                  : (RCTPromiseResolveBlock)resolve reject
++                  : (RCTPromiseRejectBlock)reject)
++{
++  RCTExecuteOnMainQueue(^{
++    if (!RCTSharedApplication().supportsMultipleScenes) {
++      reject(@"ERROR", @"Multiple scenes not supported", nil);
++    }
++    NSMutableDictionary *userInfoDict = [[NSMutableDictionary alloc] init];
++    [userInfoDict setValue:windowId forKey:@"id"];
++    if (userInfo != nil) {
++      [userInfoDict setValue:userInfo forKey:@"userInfo"];
++    }
++    [[NSNotificationCenter defaultCenter] postNotificationName:RCTOpenWindow object:self userInfo:userInfoDict];
++    resolve(nil);
++  });
++}
++
++RCT_EXPORT_METHOD(closeWindow
++                  : (NSString *)windowId resolve
++                  : (RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
++{
++  RCTExecuteOnMainQueue(^{
++    [[NSNotificationCenter defaultCenter] postNotificationName:RCTDismissWindow object:self userInfo:@{@"id": windowId}];
++    resolve(nil);
++  });
++}
++
++RCT_EXPORT_METHOD(updateWindow
++                  : (NSString *)windowId userInfo
++                  : (NSDictionary *)userInfo resolve
++                  : (RCTPromiseResolveBlock)resolve reject
++                  : (RCTPromiseRejectBlock)reject)
++{
++  RCTExecuteOnMainQueue(^{
++    if (!RCTSharedApplication().supportsMultipleScenes) {
++      reject(@"ERROR", @"Multiple scenes not supported", nil);
++    }
++    NSMutableDictionary *userInfoDict = [[NSMutableDictionary alloc] init];
++    [userInfoDict setValue:windowId forKey:@"id"];
++    if (userInfo != nil) {
++      [userInfoDict setValue:userInfo forKey:@"userInfo"];
++    }
++    [[NSNotificationCenter defaultCenter] postNotificationName:RCTUpdateWindow object:self userInfo:userInfoDict];
++    resolve(nil);
++  });
++}
++
++- (facebook::react::ModuleConstants<JS::NativeWindowManager::Constants::Builder>)constantsToExport {
++  return [self getConstants];
++}
++
++- (facebook::react::ModuleConstants<JS::NativeWindowManager::Constants>)getConstants {
++  __block facebook::react::ModuleConstants<JS::NativeWindowManager::Constants> constants;
++  RCTUnsafeExecuteOnMainQueueSync(^{
++    constants = facebook::react::typedConstants<JS::NativeWindowManager::Constants>({
++      .supportsMultipleScenes = RCTSharedApplication().supportsMultipleScenes
++    });
++  });
++  
++  return constants;
++}
++
++- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:(const facebook::react::ObjCTurboModule::InitParams &)params {
++  return std::make_shared<facebook::react::NativeWindowManagerSpecJSI>(params);
++}
++
++@end
+diff -ruN -x p rn862/package/Libraries/WindowManager/React-RCTWindowManager.podspec vos/package/Libraries/WindowManager/React-RCTWindowManager.podspec
+--- rn862/package/Libraries/WindowManager/React-RCTWindowManager.podspec	1969-12-31 19:00:00
++++ vos/package/Libraries/WindowManager/React-RCTWindowManager.podspec	1985-10-26 04:15:00
+@@ -0,0 +1,48 @@
++require "json"
++
++package = JSON.parse(File.read(File.join(__dir__, "..", "..", "package.json")))
++version = package['version']
++
++source = { :git => 'https://github.com/facebook/react-native.git' }
++if version == '1000.0.0'
++  # This is an unpublished version, use the latest commit hash of the react-native repo, which we’re presumably in.
++  source[:commit] = `git rev-parse HEAD`.strip if system("git rev-parse --git-dir > /dev/null 2>&1")
++else
++  source[:tag] = "v#{version}"
++end
++
++header_search_paths = [
++  "\"${PODS_ROOT}/Headers/Public/ReactCodegen/react/renderer/components\"",
++]
++
++Pod::Spec.new do |s|
++  s.name                   = "React-RCTWindowManager"
++  s.version                = version
++  s.summary                = "Window manager module for React Native."
++  s.homepage               = "https://callstack.github.io/react-native-visionos-docs"
++  s.documentation_url      = "https://callstack.github.io/react-native-visionos-docs/api/windowmanager"
++  s.license                = package["license"]
++  s.author                 = "Callstack"
++  s.platforms              = min_supported_versions
++  s.compiler_flags         = '-Wno-nullability-completeness'
++  s.source                 = source
++  s.source_files           = "*.{m,mm,swift}"
++  s.preserve_paths         = "package.json", "LICENSE", "LICENSE-docs"
++  s.header_dir             = "RCTWindowManager"
++  s.pod_target_xcconfig    = {
++                               "USE_HEADERMAP" => "YES",
++                               "CLANG_CXX_LANGUAGE_STANDARD" => rct_cxx_language_standard(),
++                               "HEADER_SEARCH_PATHS" => header_search_paths.join(' ')
++                             }
++
++  s.dependency "RCTTypeSafety"
++  s.dependency "React-jsi"
++  s.dependency "React-RCTFBReactNativeSpecVisionOS"
++  s.dependency "React-Core/RCTWindowManagerHeaders"
++
++  add_dependency(s, "ReactCodegen", :additional_framework_paths => ["build/generated/ios"])
++  add_dependency(s, "ReactCommon", :subspec => "turbomodule/core", :additional_framework_paths => ["react/nativemodule/core"])
++  add_dependency(s, "React-NativeModulesApple", :additional_framework_paths => ["build/generated/ios"])
++
++  add_rn_third_party_dependencies(s)
++end
+diff -ruN -x p rn862/package/Libraries/WindowManager/WindowManager.d.ts vos/package/Libraries/WindowManager/WindowManager.d.ts
+--- rn862/package/Libraries/WindowManager/WindowManager.d.ts	1969-12-31 19:00:00
++++ vos/package/Libraries/WindowManager/WindowManager.d.ts	1985-10-26 04:15:00
+@@ -0,0 +1,16 @@
++export interface WindowStatic {
++  id: String;
++  open (props?: Object): Promise<void>;
++  update (props: Object): Promise<void>;
++  close (): Promise<void>;
++}
++
++export interface WindowManagerStatic {
++  getWindow(id: String): Window;
++  supportsMultipleScenes: boolean;
++}
++
++export const WindowManager: WindowManagerStatic;
++export type WindowManager = WindowManagerStatic;
++export const Window: WindowStatic;
++export type Window = WindowStatic;
+diff -ruN -x p rn862/package/Libraries/WindowManager/WindowManager.js vos/package/Libraries/WindowManager/WindowManager.js
+--- rn862/package/Libraries/WindowManager/WindowManager.js	1969-12-31 19:00:00
++++ vos/package/Libraries/WindowManager/WindowManager.js	1985-10-26 04:15:00
+@@ -0,0 +1,63 @@
++/**
++ * @format
++ * @flow strict
++ * @jsdoc
++ */
++
++import NativeWindowManager from './NativeWindowManager';
++
++const WindowManager = {
++  getWindow: function (id: string): Window {
++    return new Window(id);
++  },
++
++  // $FlowFixMe[unsafe-getters-setters]
++  get supportsMultipleScenes(): boolean {
++    if (NativeWindowManager == null) {
++      return false;
++    }
++
++    const nativeConstants = NativeWindowManager.getConstants();
++    return nativeConstants.supportsMultipleScenes || false;
++  },
++};
++
++class Window {
++  id: string;
++
++  constructor(id: string) {
++    this.id = id;
++  }
++
++  // $FlowFixMe[unclear-type]
++  open(props: ?Object): Promise<void> {
++    if (NativeWindowManager != null && NativeWindowManager.openWindow != null) {
++      return NativeWindowManager.openWindow(this.id, props);
++    }
++    return Promise.reject(new Error('NativeWindowManager is not available'));
++  }
++
++  // $FlowFixMe[unclear-type]
++  close(): Promise<void> {
++    if (
++      NativeWindowManager != null &&
++      NativeWindowManager.closeWindow != null
++    ) {
++      return NativeWindowManager.closeWindow(this.id);
++    }
++    return Promise.reject(new Error('NativeWindowManager is not available'));
++  }
++
++  // $FlowFixMe[unclear-type]
++  update(props: ?Object): Promise<void> {
++    if (
++      NativeWindowManager != null &&
++      NativeWindowManager.updateWindow != null
++    ) {
++      return NativeWindowManager.updateWindow(this.id, props);
++    }
++    return Promise.reject(new Error('NativeWindowManager is not available'));
++  }
++}
++
++export default WindowManager;
+diff -ruN -x p rn862/package/Libraries/XR/ImmersiveBridge.swift vos/package/Libraries/XR/ImmersiveBridge.swift
+--- rn862/package/Libraries/XR/ImmersiveBridge.swift	1969-12-31 19:00:00
++++ vos/package/Libraries/XR/ImmersiveBridge.swift	1985-10-26 04:15:00
+@@ -0,0 +1,61 @@
++import Foundation
++import SwiftUI
++
++@objc public enum ImmersiveSpaceResult: Int {
++  case opened
++  case userCancelled
++  case error
++}
++
++public typealias CompletionHandlerType = (_ result: ImmersiveSpaceResult) -> Void
++
++#if os(visionOS)
++/**
++ * Utility view used to bridge the gap between SwiftUI environment and UIKit.
++ *
++ * Calls `openImmersiveSpace` when view appears in the UIKit hierarchy and `dismissImmersiveSpace` when removed.
++ */
++struct ImmersiveBridgeView: View {
++  @Environment(\.openImmersiveSpace) private var openImmersiveSpace
++  @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
++  
++  var spaceId: String
++  var completionHandler: CompletionHandlerType
++  
++  var body: some View {
++    EmptyView()
++      .onAppear {
++        Task {
++          let result = await openImmersiveSpace(id: spaceId)
++          
++          switch result {
++          case .opened:
++            completionHandler(.opened)
++          case .error:
++            completionHandler(.error)
++          case .userCancelled:
++            completionHandler(.userCancelled)
++          default:
++            break
++          }
++        }
++      }
++      .onDisappear {
++        Task { await dismissImmersiveSpace() }
++      }
++  }
++}
++#endif
++
++@objc public class SwiftUIBridgeFactory: NSObject {
++  @objc public static func makeImmersiveBridgeView(
++    spaceId: String,
++    completionHandler: @escaping CompletionHandlerType
++  ) -> UIViewController {
++#if os(visionOS)
++    return UIHostingController(rootView: ImmersiveBridgeView(spaceId: spaceId, completionHandler: completionHandler))
++#else
++    return UIViewController()
++#endif
++  }
++}
+diff -ruN -x p rn862/package/Libraries/XR/NativeXRModule.js vos/package/Libraries/XR/NativeXRModule.js
+--- rn862/package/Libraries/XR/NativeXRModule.js	1969-12-31 19:00:00
++++ vos/package/Libraries/XR/NativeXRModule.js	1985-10-26 04:15:00
+@@ -0,0 +1,9 @@
++/**
++ * @flow strict
++ * @format
++ */
++
++import NativeXRModule from '../../visionos_modules/NativeXRModule';
++
++export * from '../../visionos_modules/NativeXRModule';
++export default NativeXRModule;
+diff -ruN -x p rn862/package/Libraries/XR/RCTXRModule.h vos/package/Libraries/XR/RCTXRModule.h
+--- rn862/package/Libraries/XR/RCTXRModule.h	1969-12-31 19:00:00
++++ vos/package/Libraries/XR/RCTXRModule.h	1985-10-26 04:15:00
+@@ -0,0 +1,6 @@
++#import <Foundation/Foundation.h>
++#import <React/RCTBridgeModule.h>
++
++@interface RCTXRModule : NSObject <RCTBridgeModule>
++
++@end
+diff -ruN -x p rn862/package/Libraries/XR/RCTXRModule.mm vos/package/Libraries/XR/RCTXRModule.mm
+--- rn862/package/Libraries/XR/RCTXRModule.mm	1969-12-31 19:00:00
++++ vos/package/Libraries/XR/RCTXRModule.mm	1985-10-26 04:15:00
+@@ -0,0 +1,101 @@
++#import <React/RCTXRModule.h>
++
++#import <FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS.h>
++
++#import <React/RCTBridge.h>
++#import <React/RCTConvert.h>
++#import <React/RCTUtils.h>
++#import "RCTXR-Swift.h"
++
++// Events
++static NSString *const RCTOpenImmersiveSpace = @"RCTOpenImmersiveSpace";
++static NSString *const RCTDismissImmersiveSpace = @"RCTDismissImmersiveSpace";
++
++@interface RCTXRModule () <NativeXRModuleSpec>
++@end
++
++@implementation RCTXRModule {
++  UIViewController *_immersiveBridgeView;
++  NSString *_currentSessionId;
++}
++
++RCT_EXPORT_MODULE()
++
++RCT_EXPORT_METHOD(endSession
++                  : (RCTPromiseResolveBlock)resolve reject
++                  : (RCTPromiseRejectBlock)reject)
++{
++  [self removeViewController:self->_immersiveBridgeView];
++  self->_immersiveBridgeView = nil;
++  RCTExecuteOnMainQueue(^{
++    if (self->_currentSessionId != nil) {
++      [[NSNotificationCenter defaultCenter] postNotificationName:RCTDismissImmersiveSpace object:self userInfo:@{@"id": self->_currentSessionId}];
++    }
++  });
++  _currentSessionId = nil;
++  resolve(nil);
++}
++
++
++RCT_EXPORT_METHOD(requestSession
++                  : (NSString *)sessionId userInfo
++                  : (NSDictionary *)userInfo resolve
++                  : (RCTPromiseResolveBlock)resolve reject
++                  : (RCTPromiseRejectBlock)reject)
++{
++  RCTExecuteOnMainQueue(^{
++    if (!RCTSharedApplication().supportsMultipleScenes) {
++      reject(@"ERROR", @"Multiple scenes not supported", nil);
++    }
++    UIWindow *keyWindow = RCTKeyWindow();
++    UIViewController *rootViewController = keyWindow.rootViewController;
++    
++    if (self->_immersiveBridgeView == nil) {
++      NSMutableDictionary *userInfoDict = [[NSMutableDictionary alloc] init];
++      [userInfoDict setValue:sessionId forKey:@"id"];
++      if (userInfo != nil) {
++        [userInfoDict setValue:userInfo forKey:@"userInfo"];
++      }
++      NSNotificationCenter *notificationCenter = [NSNotificationCenter defaultCenter];
++          [notificationCenter postNotificationName:RCTOpenImmersiveSpace object:self userInfo:userInfoDict];
++      self->_currentSessionId = sessionId;
++      
++      self->_immersiveBridgeView = [SwiftUIBridgeFactory makeImmersiveBridgeViewWithSpaceId:sessionId
++                                                                            completionHandler:^(enum ImmersiveSpaceResult result){
++        if (result == ImmersiveSpaceResultError) {
++          reject(@"ERROR", @"Immersive Space failed to open, the system cannot fulfill the request.", nil);
++          [self removeViewController:self->_immersiveBridgeView];
++          self->_immersiveBridgeView = nil;
++        } else if (result == ImmersiveSpaceResultUserCancelled) {
++          reject(@"ERROR", @"Immersive Space canceled by user", nil);
++          [self removeViewController:self->_immersiveBridgeView];
++          self->_immersiveBridgeView = nil;
++        } else if (result == ImmersiveSpaceResultOpened) {
++          resolve(nil);
++        }
++      }];
++      
++      [rootViewController.view addSubview:self->_immersiveBridgeView.view];
++      [rootViewController addChildViewController:self->_immersiveBridgeView];
++      [self->_immersiveBridgeView didMoveToParentViewController:rootViewController];
++    } else {
++      reject(@"ERROR", @"Immersive Space already opened", nil);
++    }
++  });
++}
++
++
++- (void)removeViewController:(UIViewController*)viewController
++{
++  RCTExecuteOnMainQueue(^{
++    [viewController willMoveToParentViewController:nil];
++    [viewController.view removeFromSuperview];
++    [viewController removeFromParentViewController];
++  });
++}
++
++- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:(const facebook::react::ObjCTurboModule::InitParams &)params {
++  return std::make_shared<facebook::react::NativeXRModuleSpecJSI>(params);
++}
++
++@end
+diff -ruN -x p rn862/package/Libraries/XR/React-RCTXR.podspec vos/package/Libraries/XR/React-RCTXR.podspec
+--- rn862/package/Libraries/XR/React-RCTXR.podspec	1969-12-31 19:00:00
++++ vos/package/Libraries/XR/React-RCTXR.podspec	1985-10-26 04:15:00
+@@ -0,0 +1,48 @@
++require "json"
++
++package = JSON.parse(File.read(File.join(__dir__, "..", "..", "package.json")))
++version = package['version']
++
++source = { :git => 'https://github.com/facebook/react-native.git' }
++if version == '1000.0.0'
++  # This is an unpublished version, use the latest commit hash of the react-native repo, which we’re presumably in.
++  source[:commit] = `git rev-parse HEAD`.strip if system("git rev-parse --git-dir > /dev/null 2>&1")
++else
++  source[:tag] = "v#{version}"
++end
++
++header_search_paths = [
++  "\"${PODS_ROOT}/Headers/Public/ReactCodegen/react/renderer/components\"",
++]
++
++Pod::Spec.new do |s|
++  s.name                   = "React-RCTXR"
++  s.version                = version
++  s.summary                = "XR module for React Native."
++  s.homepage               = "https://callstack.github.io/react-native-visionos-docs/"
++  s.documentation_url      = "https://callstack.github.io/react-native-visionos-docs/api/XR"
++  s.license                = package["license"]
++  s.author                 = "Callstack"
++  s.platforms              = min_supported_versions
++  s.compiler_flags         = '-Wno-nullability-completeness'
++  s.source                 = source
++  s.source_files           = "*.{m,mm,swift}"
++  s.preserve_paths         = "package.json", "LICENSE", "LICENSE-docs"
++  s.header_dir             = "RCTXR"
++  s.pod_target_xcconfig    = {
++                               "USE_HEADERMAP" => "YES",
++                               "CLANG_CXX_LANGUAGE_STANDARD" => rct_cxx_language_standard(),
++                               "HEADER_SEARCH_PATHS" => header_search_paths.join(' ')
++                             }
++
++  s.dependency "RCTTypeSafety"
++  s.dependency "React-jsi"
++  s.dependency "React-RCTFBReactNativeSpecVisionOS"
++  s.dependency "React-Core/RCTXRHeaders"
++
++  add_dependency(s, "ReactCodegen", :additional_framework_paths => ["build/generated/ios"])
++  add_dependency(s, "ReactCommon", :subspec => "turbomodule/core", :additional_framework_paths => ["react/nativemodule/core"])
++  add_dependency(s, "React-NativeModulesApple", :additional_framework_paths => ["build/generated/ios"])
++
++  add_rn_third_party_dependencies(s)
++end
+diff -ruN -x p rn862/package/Libraries/XR/XR.d.ts vos/package/Libraries/XR/XR.d.ts
+--- rn862/package/Libraries/XR/XR.d.ts	1969-12-31 19:00:00
++++ vos/package/Libraries/XR/XR.d.ts	1985-10-26 04:15:00
+@@ -0,0 +1,8 @@
++
++export interface XRStatic {
++  requestSession(sessionId: string, userInfo: Object): Promise<void>;
++  endSession(): Promise<void>;
++}
++
++export const XR: XRStatic;
++export type XR = XRStatic;
+diff -ruN -x p rn862/package/Libraries/XR/XR.js vos/package/Libraries/XR/XR.js
+--- rn862/package/Libraries/XR/XR.js	1969-12-31 19:00:00
++++ vos/package/Libraries/XR/XR.js	1985-10-26 04:15:00
+@@ -0,0 +1,25 @@
++/**
++ * @format
++ * @flow strict
++ * @jsdoc
++ */
++
++import NativeXRModule from './NativeXRModule';
++
++const XR = {
++  // $FlowFixMe[unclear-type]
++  requestSession: (sessionId: string, userInfo: ?Object): Promise<void> => {
++    if (NativeXRModule != null && NativeXRModule.requestSession != null) {
++      return NativeXRModule.requestSession(sessionId, userInfo);
++    }
++    return Promise.reject(new Error('NativeXRModule is not available'));
++  },
++  endSession: (): Promise<void> => {
++    if (NativeXRModule != null && NativeXRModule.endSession != null) {
++      return NativeXRModule.endSession();
++    }
++    return Promise.reject(new Error('NativeXRModule is not available'));
++  },
++};
++
++export default XR;
+diff -ruN -x p rn862/package/React/Base/RCTBundleURLProvider.mm vos/package/React/Base/RCTBundleURLProvider.mm
+--- rn862/package/React/Base/RCTBundleURLProvider.mm	1985-10-26 04:15:00
++++ vos/package/React/Base/RCTBundleURLProvider.mm	1985-10-26 04:15:00
+@@ -467,6 +467,9 @@
+   BOOL lazy = enableDev;
+   NSMutableArray<NSURLQueryItem *> *queryItems = [[NSMutableArray alloc] initWithArray:@[
+     [[NSURLQueryItem alloc] initWithName:@"platform" value:RCTPlatformName],
++#if TARGET_OS_VISION
++    [[NSURLQueryItem alloc] initWithName:@"resolver.platformExtension" value:RCTPlatformExtension],
++#endif
+     [[NSURLQueryItem alloc] initWithName:@"dev" value:enableDev ? @"true" : @"false"],
+     [[NSURLQueryItem alloc] initWithName:@"lazy" value:lazy ? @"true" : @"false"],
+     [[NSURLQueryItem alloc] initWithName:@"minify" value:enableMinification ? @"true" : @"false"],
+diff -ruN -x p rn862/package/React/Base/RCTConstants.h vos/package/React/Base/RCTConstants.h
+--- rn862/package/React/Base/RCTConstants.h	1985-10-26 04:15:00
++++ vos/package/React/Base/RCTConstants.h	1985-10-26 04:15:00
+@@ -8,6 +8,9 @@
+ #import <React/RCTDefines.h>
+ 
+ RCT_EXTERN NSString *const RCTPlatformName;
++#if TARGET_OS_VISION
++RCT_EXTERN NSString *const RCTPlatformExtension;
++#endif
+ 
+ RCT_EXTERN NSString *const RCTUserInterfaceStyleDidChangeNotification;
+ RCT_EXTERN NSString *const RCTUserInterfaceStyleDidChangeNotificationTraitCollectionKey;
+diff -ruN -x p rn862/package/React/Base/RCTConstants.m vos/package/React/Base/RCTConstants.m
+--- rn862/package/React/Base/RCTConstants.m	1985-10-26 04:15:00
++++ vos/package/React/Base/RCTConstants.m	1985-10-26 04:15:00
+@@ -8,6 +8,9 @@
+ #import "RCTConstants.h"
+ 
+ NSString *const RCTPlatformName = @"ios";
++#if TARGET_OS_VISION
++NSString *const RCTPlatformExtension = @"visionos";
++#endif
+ 
+ NSString *const RCTUserInterfaceStyleDidChangeNotification = @"RCTUserInterfaceStyleDidChangeNotification";
+ NSString *const RCTUserInterfaceStyleDidChangeNotificationTraitCollectionKey = @"traitCollection";
+diff -ruN -x p rn862/package/React/Base/RCTKeyCommands.m vos/package/React/Base/RCTKeyCommands.m
+--- rn862/package/React/Base/RCTKeyCommands.m	1985-10-26 04:15:00
++++ vos/package/React/Base/RCTKeyCommands.m	1985-10-26 04:15:00
+@@ -127,7 +127,7 @@
+   if ([event respondsToSelector:@selector(_isKeyDown)]) {
+     isKeyDown = [event _isKeyDown];
+   }
+-
++  
+   if (isKeyDown && modifiedInput.length > 0) {
+     UIResponder *firstResponder = nil;
+     for (UIWindow *window in [self allWindows]) {
+diff -ruN -x p rn862/package/React/Base/RCTUtils.mm vos/package/React/Base/RCTUtils.mm
+--- rn862/package/React/Base/RCTUtils.mm	1985-10-26 04:15:00
++++ vos/package/React/Base/RCTUtils.mm	1985-10-26 04:15:00
+@@ -7,6 +7,7 @@
+ 
+ #import "RCTUtils.h"
+ 
++#import <atomic>
+ #import <dlfcn.h>
+ #import <mach/mach_time.h>
+ #import <objc/message.h>
+@@ -390,12 +391,49 @@
+ #if !TARGET_OS_TV
+ UIDeviceOrientation RCTDeviceOrientation(void)
+ {
++#if TARGET_OS_VISION
++  return UIDeviceOrientationPortrait;
++#else
+   return [[UIDevice currentDevice] orientation];
++#endif
+ }
+ #endif
+ 
++#if TARGET_OS_VISION
++/**
++ * visionOS has no device screen, and the app's window is resized by the user at
++ * any time, so the size cannot be cached for the lifetime of the process the way
++ * it is on iOS. `RCTKeyWindow()` may only be read on the main queue, so refresh
++ * the value whenever we are already there and serve the last known size to the
++ * other queues. Until a window exists there is nothing to report.
++ */
++static CGSize RCTVisionWindowSize(void)
++{
++  static std::atomic<CGSize> lastKnownSize{CGSizeZero};
++
++  if (RCTIsMainQueue()) {
++    CGSize windowSize = RCTKeyWindow().bounds.size;
++    if (!CGSizeEqualToSize(windowSize, CGSizeZero)) {
++      lastKnownSize.store(windowSize, std::memory_order_relaxed);
++    }
++  } else if (CGSizeEqualToSize(lastKnownSize.load(std::memory_order_relaxed), CGSizeZero)) {
++    RCTUnsafeExecuteOnMainQueueSync(^{
++      CGSize windowSize = RCTKeyWindow().bounds.size;
++      if (!CGSizeEqualToSize(windowSize, CGSizeZero)) {
++        lastKnownSize.store(windowSize, std::memory_order_relaxed);
++      }
++    });
++  }
++
++  return lastKnownSize.load(std::memory_order_relaxed);
++}
++#endif
++
+ CGSize RCTScreenSize(void)
+ {
++#if TARGET_OS_VISION
++  return RCTVisionWindowSize();
++#else
+   static CGSize portraitSize;
+   static dispatch_once_t onceToken;
+   dispatch_once(&onceToken, ^{
+@@ -415,6 +453,7 @@
+   // tvOS doesn't have device orientation, always return landscape size
+   return CGSizeMake(portraitSize.height, portraitSize.width);
+ #endif
++#endif // TARGET_OS_VISION
+ }
+ 
+ CGSize RCTViewportSize(void)
+@@ -618,7 +657,17 @@
+   if (RCTRunningInAppExtension()) {
+     return nil;
+   }
+-
++  
++  id<UIApplicationDelegate> delegate = RCTSharedApplication().delegate;
++  
++  SEL lastFocusedWindowSelector = NSSelectorFromString(@"lastFocusedWindow");
++  if ([delegate respondsToSelector:lastFocusedWindowSelector]) {
++    UIWindow *lastFocusedWindow = [delegate performSelector:lastFocusedWindowSelector];
++    if (lastFocusedWindow) {
++      return lastFocusedWindow;
++    }
++  }
++  
+   NSSet<UIScene *> *connectedScenes = RCTSharedApplication().connectedScenes;
+ 
+   UIScene *foregroundActiveScene;
+@@ -629,6 +678,14 @@
+       continue;
+     }
+ 
++    #if TARGET_OS_VISION
++    /// Presenting scenes over Immersive Spaces leads to crash: "Presentations are not permitted within volumetric window scenes."
++    if (scene.session.role == UISceneSessionRoleImmersiveSpaceApplication) {
++      continue;
++    }
++    
++#endif
++
+     if (scene.activationState == UISceneActivationStateForegroundActive) {
+       foregroundActiveScene = scene;
+       break;
+@@ -641,17 +698,35 @@
+   }
+ 
+   UIScene *sceneToUse = foregroundActiveScene ? foregroundActiveScene : foregroundInactiveScene;
++  UIWindowScene *windowScene = (UIWindowScene *)sceneToUse;
+ 
++#if TARGET_OS_VISION
++    // Ornaments are supported only on visionOS.
++    // When clicking on an ornament it becomes the keyWindow.
++    // Presenting a RN modal from ornament leads to a crash.
++    UIWindow* keyWindow = windowScene.keyWindow;
++    BOOL isOrnament = [keyWindow.debugDescription containsString:@"Ornament"];
++    if (isOrnament) {
++      for (UIWindow *window in windowScene.windows) {
++        BOOL isOrnament = [window.debugDescription containsString:@"Ornament"];
++        if (window != keyWindow && !isOrnament) {
++          return window;
++        }
++      }
++    }
++    
++    return keyWindow;
++#else
+   if ([sceneToUse respondsToSelector:@selector(keyWindow)]) {
+     // We have apps internally that might use UIScenes which are not window scenes.
+     // Calling keyWindow on a UIScene which is not a UIWindowScene can cause a crash
+-    UIWindowScene *windowScene = (UIWindowScene *)sceneToUse;
+     if (@available(iOS 15.0, tvOS 15.0, *)) {
+       return windowScene.keyWindow;
+     }
+   }
+ 
+   return nil;
++#endif
+ }
+ 
+ #if !TARGET_OS_TV
+diff -ruN -x p rn862/package/React/CoreModules/RCTAlertController.mm vos/package/React/CoreModules/RCTAlertController.mm
+--- rn862/package/React/CoreModules/RCTAlertController.mm	1985-10-26 04:15:00
++++ vos/package/React/CoreModules/RCTAlertController.mm	1985-10-26 04:15:00
+@@ -9,6 +9,20 @@
+ 
+ #import <React/RCTAlertController.h>
+ 
++#if TARGET_OS_VISION
++@interface TransparentViewController : UIViewController
++
++@end
++
++@implementation TransparentViewController
++
++- (UIContainerBackgroundStyle)preferredContainerBackgroundStyle {
++  return UIContainerBackgroundStyleHidden;
++}
++
++@end
++#endif
++
+ @interface RCTAlertController ()
+ 
+ @property (nonatomic, strong) UIWindow *alertWindow;
+@@ -24,11 +38,19 @@
+     if (scene != nil) {
+       _alertWindow = [[UIWindow alloc] initWithWindowScene:scene];
+     } else {
++#if TARGET_OS_VISION
++      _alertWindow = [[UIWindow alloc] initWithFrame:CGRectZero];
++#else
+       _alertWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
++#endif
+     }
+ 
+     if (_alertWindow != nullptr) {
++#if TARGET_OS_VISION
++      _alertWindow.rootViewController = [TransparentViewController new];
++#else
+       _alertWindow.rootViewController = [UIViewController new];
++#endif
+       _alertWindow.windowLevel = UIWindowLevelAlert + 1;
+     }
+   }
+diff -ruN -x p rn862/package/React/CoreModules/RCTAppearance.mm vos/package/React/CoreModules/RCTAppearance.mm
+--- rn862/package/React/CoreModules/RCTAppearance.mm	1985-10-26 04:15:00
++++ vos/package/React/CoreModules/RCTAppearance.mm	1985-10-26 04:15:00
+@@ -69,7 +69,8 @@
+   UIUserInterfaceStyle systemStyle = sUseKeyWindowForSystemStyle ? RCTKeyWindow().traitCollection.userInterfaceStyle
+                                                                  : traitCollection.userInterfaceStyle;
+ 
+-  return appearances[@(systemStyle)] ?: RCTAppearanceColorSchemeLight;
++  // Fallback to dark mode on visionOS
++  return appearances[@(systemStyle)] ?: RCTAppearanceColorSchemeDark;
+ }
+ 
+ @interface RCTAppearance () <NativeAppearanceSpec>
+diff -ruN -x p rn862/package/React/CoreModules/RCTDevMenu.mm vos/package/React/CoreModules/RCTDevMenu.mm
+--- rn862/package/React/CoreModules/RCTDevMenu.mm	1985-10-26 04:15:00
++++ vos/package/React/CoreModules/RCTDevMenu.mm	1985-10-26 04:15:00
+@@ -473,9 +473,15 @@
+ {
+   return ^(__unused UIAlertAction *action) {
+     if (item != nullptr) {
++#if TARGET_OS_VISION
++      /// Execute this handler after the action sheet is dismissed to properly retrieve window when using SwiftUI entry point.
++      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0), dispatch_get_main_queue(), ^{
++        [item callHandler];
++      });
++#else
+       [item callHandler];
++#endif
+     }
+-
+     self->_actionSheet = nil;
+   };
+ }
+diff -ruN -x p rn862/package/React/CoreModules/RCTDeviceInfo.mm vos/package/React/CoreModules/RCTDeviceInfo.mm
+--- rn862/package/React/CoreModules/RCTDeviceInfo.mm	1985-10-26 04:15:00
++++ vos/package/React/CoreModules/RCTDeviceInfo.mm	1985-10-26 04:15:00
+@@ -186,24 +186,34 @@
+ static NSDictionary *RCTExportedDimensions(CGFloat fontScale)
+ {
+   RCTAssertMainQueue();
+-  UIScreen *mainScreen = UIScreen.mainScreen;
+-  CGSize screenSize = mainScreen.bounds.size;
++  CGFloat scale = [UITraitCollection currentTraitCollection].displayScale;
+   UIView *mainWindow = RCTKeyWindow();
+ 
+   // We fallback to screen size if a key window is not found.
+-  CGSize windowSize = mainWindow ? mainWindow.bounds.size : screenSize;
++  CGSize windowSize = mainWindow ? mainWindow.bounds.size : CGSizeZero;
+ 
++#if TARGET_OS_IOS
++  UIScreen *mainScreen = UIScreen.mainScreen;
++  CGSize screenSize = mainScreen.bounds.size;
++  if (CGSizeEqualToSize(windowSize, CGSizeZero)) {
++    windowSize = screenSize;
++  }
++#else
++  // On visionOS, screen size is not meaningful; use window size for both
++  CGSize screenSize = windowSize;
++#endif
++
+   NSDictionary<NSString *, NSNumber *> *dimsWindow = @{
+     @"width" : @(windowSize.width),
+     @"height" : @(windowSize.height),
+-    @"scale" : @(mainScreen.scale),
++    @"scale" : @(scale),
+     @"fontScale" : @(fontScale)
+   };
+ 
+   NSDictionary<NSString *, NSNumber *> *dimsScreen = @{
+     @"width" : @(screenSize.width),
+     @"height" : @(screenSize.height),
+-    @"scale" : @(mainScreen.scale),
++    @"scale" : @(scale),
+     @"fontScale" : @(fontScale)
+   };
+   return @{@"window" : dimsWindow, @"screen" : dimsScreen};
+diff -ruN -x p rn862/package/React/CoreModules/RCTKeyboardObserver.mm vos/package/React/CoreModules/RCTKeyboardObserver.mm
+--- rn862/package/React/CoreModules/RCTKeyboardObserver.mm	1985-10-26 04:15:00
++++ vos/package/React/CoreModules/RCTKeyboardObserver.mm	1985-10-26 04:15:00
+@@ -113,6 +113,7 @@
+ 
+ static NSDictionary *RCTParseKeyboardNotification(NSNotification *notification)
+ {
++#if TARGET_OS_IOS
+   NSDictionary *userInfo = notification.userInfo;
+   CGRect beginFrame = [userInfo[UIKeyboardFrameBeginUserInfoKey] CGRectValue];
+   CGRect endFrame = [userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+@@ -132,6 +133,9 @@
+     @"easing" : RCTAnimationNameForCurve(curve),
+     @"isEventFromThisApp" : isLocalUserInfoKey == 1 ? @YES : @NO,
+   };
++#else
++  return {};
++#endif
+ }
+ 
+ #else
+diff -ruN -x p rn862/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS-generated.mm vos/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS-generated.mm
+--- rn862/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS-generated.mm	1969-12-31 19:00:00
++++ vos/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS-generated.mm	1985-10-26 04:15:00
+@@ -0,0 +1,91 @@
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateModuleObjCpp
++ *
++ * We create an umbrella header (and corresponding implementation) here since
++ * Cxx compilation in BUCK has a limitation: source-code producing genrule()s
++ * must have a single output. More files => more genrule()s => slower builds.
++ */
++
++#import "FBReactNativeSpec_visionOS.h"
++
++
++@implementation NativeWindowManagerSpecBase
++
++
++- (void)setEventEmitterCallback:(EventEmitterCallbackWrapper *)eventEmitterCallbackWrapper
++{
++  _eventEmitterCallback = std::move(eventEmitterCallbackWrapper->_eventEmitterCallback);
++}
++@end
++
++
++namespace facebook::react {
++  
++    static facebook::jsi::Value __hostFunction_NativeWindowManagerSpecJSI_openWindow(facebook::jsi::Runtime& rt, TurboModule &turboModule, const facebook::jsi::Value* args, size_t count) {
++      return static_cast<ObjCTurboModule&>(turboModule).invokeObjCMethod(rt, PromiseKind, "openWindow", @selector(openWindow:userInfo:resolve:reject:), args, count);
++    }
++
++    static facebook::jsi::Value __hostFunction_NativeWindowManagerSpecJSI_updateWindow(facebook::jsi::Runtime& rt, TurboModule &turboModule, const facebook::jsi::Value* args, size_t count) {
++      return static_cast<ObjCTurboModule&>(turboModule).invokeObjCMethod(rt, PromiseKind, "updateWindow", @selector(updateWindow:userInfo:resolve:reject:), args, count);
++    }
++
++    static facebook::jsi::Value __hostFunction_NativeWindowManagerSpecJSI_closeWindow(facebook::jsi::Runtime& rt, TurboModule &turboModule, const facebook::jsi::Value* args, size_t count) {
++      return static_cast<ObjCTurboModule&>(turboModule).invokeObjCMethod(rt, PromiseKind, "closeWindow", @selector(closeWindow:resolve:reject:), args, count);
++    }
++
++    static facebook::jsi::Value __hostFunction_NativeWindowManagerSpecJSI_getConstants(facebook::jsi::Runtime& rt, TurboModule &turboModule, const facebook::jsi::Value* args, size_t count) {
++      return static_cast<ObjCTurboModule&>(turboModule).invokeObjCMethod(rt, ObjectKind, "getConstants", @selector(getConstants), args, count);
++    }
++
++  NativeWindowManagerSpecJSI::NativeWindowManagerSpecJSI(const ObjCTurboModule::InitParams &params)
++    : ObjCTurboModule(params) {
++      
++        methodMap_["openWindow"] = MethodMetadata {2, __hostFunction_NativeWindowManagerSpecJSI_openWindow};
++        
++        
++        methodMap_["updateWindow"] = MethodMetadata {2, __hostFunction_NativeWindowManagerSpecJSI_updateWindow};
++        
++        
++        methodMap_["closeWindow"] = MethodMetadata {1, __hostFunction_NativeWindowManagerSpecJSI_closeWindow};
++        
++        
++        methodMap_["getConstants"] = MethodMetadata {0, __hostFunction_NativeWindowManagerSpecJSI_getConstants};
++        
++  }
++} // namespace facebook::react
++
++@implementation NativeXRModuleSpecBase
++
++
++- (void)setEventEmitterCallback:(EventEmitterCallbackWrapper *)eventEmitterCallbackWrapper
++{
++  _eventEmitterCallback = std::move(eventEmitterCallbackWrapper->_eventEmitterCallback);
++}
++@end
++
++
++namespace facebook::react {
++  
++    static facebook::jsi::Value __hostFunction_NativeXRModuleSpecJSI_requestSession(facebook::jsi::Runtime& rt, TurboModule &turboModule, const facebook::jsi::Value* args, size_t count) {
++      return static_cast<ObjCTurboModule&>(turboModule).invokeObjCMethod(rt, PromiseKind, "requestSession", @selector(requestSession:userInfo:resolve:reject:), args, count);
++    }
++
++    static facebook::jsi::Value __hostFunction_NativeXRModuleSpecJSI_endSession(facebook::jsi::Runtime& rt, TurboModule &turboModule, const facebook::jsi::Value* args, size_t count) {
++      return static_cast<ObjCTurboModule&>(turboModule).invokeObjCMethod(rt, PromiseKind, "endSession", @selector(endSession:reject:), args, count);
++    }
++
++  NativeXRModuleSpecJSI::NativeXRModuleSpecJSI(const ObjCTurboModule::InitParams &params)
++    : ObjCTurboModule(params) {
++      
++        methodMap_["requestSession"] = MethodMetadata {2, __hostFunction_NativeXRModuleSpecJSI_requestSession};
++        
++        
++        methodMap_["endSession"] = MethodMetadata {0, __hostFunction_NativeXRModuleSpecJSI_endSession};
++        
++  }
++} // namespace facebook::react
+diff -ruN -x p rn862/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS.h vos/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS.h
+--- rn862/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS.h	1969-12-31 19:00:00
++++ vos/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOS.h	1985-10-26 04:15:00
+@@ -0,0 +1,142 @@
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateModuleObjCpp
++ *
++ * We create an umbrella header (and corresponding implementation) here since
++ * Cxx compilation in BUCK has a limitation: source-code producing genrule()s
++ * must have a single output. More files => more genrule()s => slower builds.
++ */
++
++#ifndef __cplusplus
++#error This file must be compiled as Obj-C++. If you are importing it, you must change your file extension to .mm.
++#endif
++
++// Avoid multiple includes of FBReactNativeSpec_visionOS symbols
++#ifndef FBReactNativeSpec_visionOS_H
++#define FBReactNativeSpec_visionOS_H
++
++#import <Foundation/Foundation.h>
++#import <RCTRequired/RCTRequired.h>
++#import <RCTTypeSafety/RCTConvertHelpers.h>
++#import <RCTTypeSafety/RCTTypedModuleConstants.h>
++#import <React/RCTBridgeModule.h>
++#import <React/RCTCxxConvert.h>
++#import <React/RCTManagedPointer.h>
++#import <ReactCommon/RCTTurboModule.h>
++#import <optional>
++#import <vector>
++
++
++NS_ASSUME_NONNULL_BEGIN
++namespace JS {
++  namespace NativeWindowManager {
++    struct Constants {
++
++      struct Builder {
++        // Backwards compat for RCTTypedModuleConstants
++        using ResultT = Constants;
++
++        struct Input {
++          std::optional<bool> supportsMultipleScenes;
++        };
++
++        /** Initialize with a set of values */
++        Builder(const Input i);
++        /** Initialize with an existing Constants */
++        Builder(Constants i);
++        /** Builds the object. Generally used only by the infrastructure. */
++        NSDictionary *buildUnsafeRawValue() const { return _factory(); };
++      private:
++        NSDictionary *(^_factory)(void);
++      };
++
++      static Constants fromUnsafeRawValue(NSDictionary *const v) { return {v}; }
++      NSDictionary *unsafeRawValue() const { return _v; }
++    private:
++      Constants(NSDictionary *const v) : _v(v) {}
++      NSDictionary *_v;
++    };
++  }
++}
++@protocol NativeWindowManagerSpec <RCTBridgeModule, RCTTurboModule>
++
++- (void)openWindow:(NSString *)windowId
++          userInfo:(NSDictionary *)userInfo
++           resolve:(RCTPromiseResolveBlock)resolve
++            reject:(RCTPromiseRejectBlock)reject;
++- (void)updateWindow:(NSString *)windowId
++            userInfo:(NSDictionary *)userInfo
++             resolve:(RCTPromiseResolveBlock)resolve
++              reject:(RCTPromiseRejectBlock)reject;
++- (void)closeWindow:(NSString *)windowId
++            resolve:(RCTPromiseResolveBlock)resolve
++             reject:(RCTPromiseRejectBlock)reject;
++- (facebook::react::ModuleConstants<JS::NativeWindowManager::Constants>)constantsToExport;
++- (facebook::react::ModuleConstants<JS::NativeWindowManager::Constants>)getConstants;
++
++@end
++
++@interface NativeWindowManagerSpecBase : NSObject {
++@protected
++facebook::react::EventEmitterCallback _eventEmitterCallback;
++}
++- (void)setEventEmitterCallback:(EventEmitterCallbackWrapper *)eventEmitterCallbackWrapper;
++
++
++@end
++
++namespace facebook::react {
++  /**
++   * ObjC++ class for module 'NativeWindowManager'
++   */
++  class JSI_EXPORT NativeWindowManagerSpecJSI : public ObjCTurboModule {
++  public:
++    NativeWindowManagerSpecJSI(const ObjCTurboModule::InitParams &params);
++  };
++} // namespace facebook::react
++
++@protocol NativeXRModuleSpec <RCTBridgeModule, RCTTurboModule>
++
++- (void)requestSession:(NSString *)sessionId
++              userInfo:(NSDictionary *)userInfo
++               resolve:(RCTPromiseResolveBlock)resolve
++                reject:(RCTPromiseRejectBlock)reject;
++- (void)endSession:(RCTPromiseResolveBlock)resolve
++            reject:(RCTPromiseRejectBlock)reject;
++
++@end
++
++@interface NativeXRModuleSpecBase : NSObject {
++@protected
++facebook::react::EventEmitterCallback _eventEmitterCallback;
++}
++- (void)setEventEmitterCallback:(EventEmitterCallbackWrapper *)eventEmitterCallbackWrapper;
++
++
++@end
++
++namespace facebook::react {
++  /**
++   * ObjC++ class for module 'NativeXRModule'
++   */
++  class JSI_EXPORT NativeXRModuleSpecJSI : public ObjCTurboModule {
++  public:
++    NativeXRModuleSpecJSI(const ObjCTurboModule::InitParams &params);
++  };
++} // namespace facebook::react
++inline JS::NativeWindowManager::Constants::Builder::Builder(const Input i) : _factory(^{
++  NSMutableDictionary *d = [NSMutableDictionary new];
++  auto supportsMultipleScenes = i.supportsMultipleScenes;
++  d[@"supportsMultipleScenes"] = supportsMultipleScenes.has_value() ? @((BOOL)supportsMultipleScenes.value()) : nil;
++  return d;
++}) {}
++inline JS::NativeWindowManager::Constants::Builder::Builder(Constants i) : _factory(^{
++  return i.unsafeRawValue();
++}) {}
++
++NS_ASSUME_NONNULL_END
++#endif // FBReactNativeSpec_visionOS_H
+diff -ruN -x p rn862/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOSJSI.h vos/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOSJSI.h
+--- rn862/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOSJSI.h	1969-12-31 19:00:00
++++ vos/package/React/FBReactNativeSpec_visionOS/FBReactNativeSpec_visionOSJSI.h	1985-10-26 04:15:00
+@@ -0,0 +1,138 @@
++/**
++ * This code was generated by [react-native-codegen](https://www.npmjs.com/package/react-native-codegen).
++ *
++ * Do not edit this file as changes may cause incorrect behavior and will be lost
++ * once the code is regenerated.
++ *
++ * @generated by codegen project: GenerateModuleH.js
++ */
++
++#pragma once
++
++#include <ReactCommon/TurboModule.h>
++#include <react/bridging/Bridging.h>
++
++namespace facebook::react {
++
++
++#pragma mark - NativeWindowManagerWindowManagerConstants
++
++template <typename P0>
++struct NativeWindowManagerWindowManagerConstants {
++  P0 supportsMultipleScenes;
++  bool operator==(const NativeWindowManagerWindowManagerConstants &other) const {
++    return supportsMultipleScenes == other.supportsMultipleScenes;
++  }
++};
++
++template <typename T>
++struct NativeWindowManagerWindowManagerConstantsBridging {
++  static T types;
++
++  static T fromJs(
++      jsi::Runtime &rt,
++      const jsi::Object &value,
++      const std::shared_ptr<CallInvoker> &jsInvoker) {
++    T result{
++      bridging::fromJs<decltype(types.supportsMultipleScenes)>(rt, value.getProperty(rt, "supportsMultipleScenes"), jsInvoker)};
++    return result;
++  }
++
++#ifdef DEBUG
++  static bool supportsMultipleScenesToJs(jsi::Runtime &rt, decltype(types.supportsMultipleScenes) value) {
++    return bridging::toJs(rt, value);
++  }
++#endif
++
++  static jsi::Object toJs(
++      jsi::Runtime &rt,
++      const T &value,
++      const std::shared_ptr<CallInvoker> &jsInvoker) {
++    auto result = facebook::jsi::Object(rt);
++    if (value.supportsMultipleScenes) {
++      result.setProperty(rt, "supportsMultipleScenes", bridging::toJs(rt, value.supportsMultipleScenes.value(), jsInvoker));
++    }
++    return result;
++  }
++};
++
++
++template <typename T>
++class JSI_EXPORT NativeWindowManagerCxxSpec : public TurboModule {
++public:
++  static constexpr std::string_view kModuleName = "WindowManager";
++
++protected:
++  NativeWindowManagerCxxSpec(std::shared_ptr<CallInvoker> jsInvoker) : TurboModule(std::string{NativeWindowManagerCxxSpec::kModuleName}, jsInvoker) {
++    methodMap_["getConstants"] = MethodMetadata {.argCount = 0, .invoker = __getConstants};
++    methodMap_["openWindow"] = MethodMetadata {.argCount = 2, .invoker = __openWindow};
++    methodMap_["updateWindow"] = MethodMetadata {.argCount = 2, .invoker = __updateWindow};
++    methodMap_["closeWindow"] = MethodMetadata {.argCount = 1, .invoker = __closeWindow};
++  }
++  
++private:
++  static jsi::Value __getConstants(jsi::Runtime &rt, TurboModule &turboModule, const jsi::Value* /*args*/, size_t /*count*/) {
++    static_assert(
++      bridging::getParameterCount(&T::getConstants) == 1,
++      "Expected getConstants(...) to have 1 parameters");
++    return bridging::callFromJs<jsi::Object>(rt, &T::getConstants,  static_cast<NativeWindowManagerCxxSpec*>(&turboModule)->jsInvoker_, static_cast<T*>(&turboModule));
++  }
++
++  static jsi::Value __openWindow(jsi::Runtime &rt, TurboModule &turboModule, const jsi::Value* args, size_t count) {
++    static_assert(
++      bridging::getParameterCount(&T::openWindow) == 3,
++      "Expected openWindow(...) to have 3 parameters");
++    return bridging::callFromJs<jsi::Value>(rt, &T::openWindow,  static_cast<NativeWindowManagerCxxSpec*>(&turboModule)->jsInvoker_, static_cast<T*>(&turboModule),
++      count <= 0 ? throw jsi::JSError(rt, "Expected argument in position 0 to be passed") : args[0].asString(rt),
++      count <= 1 ? throw jsi::JSError(rt, "Expected argument in position 1 to be passed") : args[1].asObject(rt));
++  }
++
++  static jsi::Value __updateWindow(jsi::Runtime &rt, TurboModule &turboModule, const jsi::Value* args, size_t count) {
++    static_assert(
++      bridging::getParameterCount(&T::updateWindow) == 3,
++      "Expected updateWindow(...) to have 3 parameters");
++    return bridging::callFromJs<jsi::Value>(rt, &T::updateWindow,  static_cast<NativeWindowManagerCxxSpec*>(&turboModule)->jsInvoker_, static_cast<T*>(&turboModule),
++      count <= 0 ? throw jsi::JSError(rt, "Expected argument in position 0 to be passed") : args[0].asString(rt),
++      count <= 1 ? throw jsi::JSError(rt, "Expected argument in position 1 to be passed") : args[1].asObject(rt));
++  }
++
++  static jsi::Value __closeWindow(jsi::Runtime &rt, TurboModule &turboModule, const jsi::Value* args, size_t count) {
++    static_assert(
++      bridging::getParameterCount(&T::closeWindow) == 2,
++      "Expected closeWindow(...) to have 2 parameters");
++    return bridging::callFromJs<jsi::Value>(rt, &T::closeWindow,  static_cast<NativeWindowManagerCxxSpec*>(&turboModule)->jsInvoker_, static_cast<T*>(&turboModule),
++      count <= 0 ? throw jsi::JSError(rt, "Expected argument in position 0 to be passed") : args[0].asString(rt));
++  }
++};
++
++
++template <typename T>
++class JSI_EXPORT NativeXRModuleCxxSpec : public TurboModule {
++public:
++  static constexpr std::string_view kModuleName = "XRModule";
++
++protected:
++  NativeXRModuleCxxSpec(std::shared_ptr<CallInvoker> jsInvoker) : TurboModule(std::string{NativeXRModuleCxxSpec::kModuleName}, jsInvoker) {
++    methodMap_["requestSession"] = MethodMetadata {.argCount = 2, .invoker = __requestSession};
++    methodMap_["endSession"] = MethodMetadata {.argCount = 0, .invoker = __endSession};
++  }
++  
++private:
++  static jsi::Value __requestSession(jsi::Runtime &rt, TurboModule &turboModule, const jsi::Value* args, size_t count) {
++    static_assert(
++      bridging::getParameterCount(&T::requestSession) == 3,
++      "Expected requestSession(...) to have 3 parameters");
++    return bridging::callFromJs<jsi::Value>(rt, &T::requestSession,  static_cast<NativeXRModuleCxxSpec*>(&turboModule)->jsInvoker_, static_cast<T*>(&turboModule),
++      count <= 0 || args[0].isUndefined() ? std::nullopt : std::make_optional(args[0].asString(rt)),
++      count <= 1 ? throw jsi::JSError(rt, "Expected argument in position 1 to be passed") : args[1].asObject(rt));
++  }
++
++  static jsi::Value __endSession(jsi::Runtime &rt, TurboModule &turboModule, const jsi::Value* /*args*/, size_t /*count*/) {
++    static_assert(
++      bridging::getParameterCount(&T::endSession) == 1,
++      "Expected endSession(...) to have 1 parameters");
++    return bridging::callFromJs<jsi::Value>(rt, &T::endSession,  static_cast<NativeXRModuleCxxSpec*>(&turboModule)->jsInvoker_, static_cast<T*>(&turboModule));
++  }
++};
++
++} // namespace facebook::react
+diff -ruN -x p rn862/package/React/Fabric/Mounting/ComponentViews/InputAccessory/RCTInputAccessoryComponentView.mm vos/package/React/Fabric/Mounting/ComponentViews/InputAccessory/RCTInputAccessoryComponentView.mm
+--- rn862/package/React/Fabric/Mounting/ComponentViews/InputAccessory/RCTInputAccessoryComponentView.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/Mounting/ComponentViews/InputAccessory/RCTInputAccessoryComponentView.mm	1985-10-26 04:15:00
+@@ -70,7 +70,9 @@
+   if (self.window && !_textInput) {
+     if (self.nativeId) {
+       _textInput = RCTFindTextInputWithNativeId(self.window, self.nativeId);
++#if !TARGET_OS_VISION
+       _textInput.inputAccessoryView = _contentView;
++#endif
+     } else {
+       _textInput = RCTFindTextInputWithNativeId(_contentView, nil);
+     }
+@@ -86,10 +88,12 @@
+   return true;
+ }
+ 
++#if !TARGET_OS_VISION
+ - (UIView *)inputAccessoryView
+ {
+   return _contentView;
+ }
++#endif
+ 
+ #pragma mark - RCTComponentViewProtocol
+ 
+diff -ruN -x p rn862/package/React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponentView.mm vos/package/React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponentView.mm
+--- rn862/package/React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponentView.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponentView.mm	1985-10-26 04:15:00
+@@ -34,6 +34,7 @@
+ 
+ static const CGFloat kClippingLeeway = 44.0;
+ 
++#if !TARGET_OS_VISION
+ static UIScrollViewKeyboardDismissMode RCTUIKeyboardDismissModeFromProps(const ScrollViewProps &props)
+ {
+   switch (props.keyboardDismissMode) {
+@@ -45,6 +46,7 @@
+       return UIScrollViewKeyboardDismissModeInteractive;
+   }
+ }
++#endif
+ 
+ static UIScrollViewIndicatorStyle RCTUIScrollViewIndicatorStyleFromProps(const ScrollViewProps &props)
+ {
+@@ -443,9 +445,11 @@
+   MAP_SCROLL_VIEW_PROP(disableIntervalMomentum);
+   MAP_SCROLL_VIEW_PROP(snapToInterval);
+ 
++#if !TARGET_OS_VISION
+   if (oldScrollViewProps.keyboardDismissMode != newScrollViewProps.keyboardDismissMode) {
+     scrollView.keyboardDismissMode = RCTUIKeyboardDismissModeFromProps(newScrollViewProps);
+   }
++#endif
+ 
+   [super updateProps:props oldProps:oldProps];
+ }
+diff -ruN -x p rn862/package/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm vos/package/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm
+--- rn862/package/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/Mounting/ComponentViews/Text/RCTParagraphComponentView.mm	1985-10-26 04:15:00
+@@ -317,6 +317,7 @@
+       [_editMenuInteraction presentEditMenuWithConfiguration:config];
+     }
+   } else {
++#if !TARGET_OS_VISION
+     UIMenuController *menuController = [UIMenuController sharedMenuController];
+ 
+     if (menuController.isMenuVisible) {
+@@ -324,6 +325,7 @@
+     }
+ 
+     [menuController showMenuFromView:self rect:self.bounds];
++#endif
+   }
+ }
+ 
+diff -ruN -x p rn862/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm vos/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm
+--- rn862/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm	1985-10-26 04:15:00
+@@ -385,7 +385,9 @@
+   _ignoreNextTextInputCall = NO;
+   _didMoveToWindow = NO;
+   _backedTextInputView.inputAccessoryViewID = nil;
++#if !TARGET_OS_VISION
+   _backedTextInputView.inputAccessoryView = nil;
++#endif
+   _hasInputAccessoryView = false;
+   [_backedTextInputView resignFirstResponder];
+ }
+@@ -643,6 +645,7 @@
+ 
+ - (void)setDefaultInputAccessoryView
+ {
++#if !TARGET_OS_VISION
+   // InputAccessoryView component sets the inputAccessoryView when inputAccessoryViewID exists
+   if (_backedTextInputView.inputAccessoryViewID) {
+     if (_backedTextInputView.isFirstResponder) {
+@@ -694,6 +697,7 @@
+   if (_backedTextInputView.isFirstResponder) {
+     [_backedTextInputView reloadInputViews];
+   }
++#endif
+ }
+ 
+ - (void)handleInputAccessoryDoneButton
+diff -ruN -x p rn862/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputUtils.mm vos/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputUtils.mm
+--- rn862/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputUtils.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputUtils.mm	1985-10-26 04:15:00
+@@ -26,7 +26,9 @@
+   toTextInput.placeholder = fromTextInput.placeholder;
+   toTextInput.placeholderColor = fromTextInput.placeholderColor;
+   toTextInput.textContainerInset = fromTextInput.textContainerInset;
++#if !TARGET_OS_VISION
+   toTextInput.inputAccessoryView = fromTextInput.inputAccessoryView;
++#endif
+   toTextInput.textInputDelegate = fromTextInput.textInputDelegate;
+   toTextInput.placeholderColor = fromTextInput.placeholderColor;
+   toTextInput.defaultTextAttributes = fromTextInput.defaultTextAttributes;
+diff -ruN -x p rn862/package/React/Fabric/RCTSurfacePointerHandler.mm vos/package/React/Fabric/RCTSurfacePointerHandler.mm
+--- rn862/package/React/Fabric/RCTSurfacePointerHandler.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/RCTSurfacePointerHandler.mm	1985-10-26 04:15:00
+@@ -289,9 +289,15 @@
+ 
+   if (eventType == RCTPointerEventTypeCancel) {
+     event.clientPoint = RCTPointFromCGPoint(CGPointZero);
++#if TARGET_OS_VISION
+     event.screenPoint =
+         RCTPointFromCGPoint([rootComponentView convertPoint:CGPointZero
++                                          toCoordinateSpace:rootComponentView.window.coordinateSpace]);
++#else
++    event.screenPoint =
++        RCTPointFromCGPoint([rootComponentView convertPoint:CGPointZero
+                                           toCoordinateSpace:rootComponentView.window.screen.coordinateSpace]);
++#endif
+     event.offsetPoint = RCTPointFromCGPoint([rootComponentView convertPoint:CGPointZero
+                                                                      toView:activePointer.componentView]);
+   } else {
+@@ -336,7 +342,6 @@
+   event.tangentialPressure = 0.0;
+   event.twist = 0;
+   event.isPrimary = activePointer.isPrimary;
+-
+   return event;
+ }
+ 
+@@ -383,8 +388,13 @@
+   activePointer.componentView = FindClosestFabricManagedTouchableView(hitTestedView);
+ 
+   activePointer.clientPoint = [uiTouch locationInView:rootComponentView];
++#if TARGET_OS_VISION
+   activePointer.screenPoint = [rootComponentView convertPoint:activePointer.clientPoint
++                                            toCoordinateSpace:rootComponentView.window.coordinateSpace];
++#else
++  activePointer.screenPoint = [rootComponentView convertPoint:activePointer.clientPoint
+                                             toCoordinateSpace:rootComponentView.window.screen.coordinateSpace];
++#endif
+   activePointer.offsetPoint = [uiTouch locationInView:activePointer.componentView];
+ 
+   activePointer.timestamp = uiTouch.timestamp;
+@@ -751,9 +761,13 @@
+ {
+   UIView *listenerView = recognizer.view;
+   CGPoint clientLocation = [recognizer locationInView:listenerView];
++#if TARGET_OS_VISION
+   CGPoint screenLocation = [listenerView convertPoint:clientLocation
++                                    toCoordinateSpace:listenerView.window.coordinateSpace];
++#else
++  CGPoint screenLocation = [listenerView convertPoint:clientLocation
+                                     toCoordinateSpace:listenerView.window.screen.coordinateSpace];
+-
++#endif
+   UIView *targetView = [listenerView hitTest:clientLocation withEvent:nil];
+   targetView = FindClosestFabricManagedTouchableView(targetView);
+ 
+diff -ruN -x p rn862/package/React/Fabric/RCTSurfaceTouchHandler.mm vos/package/React/Fabric/RCTSurfaceTouchHandler.mm
+--- rn862/package/React/Fabric/RCTSurfaceTouchHandler.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/RCTSurfaceTouchHandler.mm	1985-10-26 04:15:00
+@@ -58,8 +58,13 @@
+ {
+   CGPoint offsetPoint = [uiTouch locationInView:activeTouch.componentView];
+   CGPoint pagePoint = [uiTouch locationInView:rootComponentView];
++#if TARGET_OS_VISION
+   CGPoint screenPoint = [rootComponentView convertPoint:pagePoint
++                                      toCoordinateSpace:rootComponentView.window.coordinateSpace];
++#else
++  CGPoint screenPoint = [rootComponentView convertPoint:pagePoint
+                                       toCoordinateSpace:rootComponentView.window.screen.coordinateSpace];
++#endif
+   pagePoint = CGPointMake(pagePoint.x + rootViewOriginOffset.x, pagePoint.y + rootViewOriginOffset.y);
+ 
+   activeTouch.touch.offsetPoint = RCTPointFromCGPoint(offsetPoint);
+diff -ruN -x p rn862/package/React/Fabric/Utils/RCTBoxShadow.mm vos/package/React/Fabric/Utils/RCTBoxShadow.mm
+--- rn862/package/React/Fabric/Utils/RCTBoxShadow.mm	1985-10-26 04:15:00
++++ vos/package/React/Fabric/Utils/RCTBoxShadow.mm	1985-10-26 04:15:00
+@@ -65,7 +65,11 @@
+   // with the radius. This is an eyeballed adjustment that has the blur looking
+   // more like the web.
+   shadowLayer.shadowRadius = shadow.blurRadius / 2;
++#if TARGET_OS_VISION
++  shadowLayer.contentsScale = [UITraitCollection currentTraitCollection].displayScale;
++#else
+   shadowLayer.contentsScale = [UIScreen mainScreen].scale;
++#endif
+ 
+   return shadowLayer;
+ }
+@@ -84,7 +88,11 @@
+   shadowLayer.shadowPath = shadowRectPath;
+ 
+   CAShapeLayer *mask = [CAShapeLayer new];
++#if TARGET_OS_VISION
++  [mask setContentsScale:[UITraitCollection currentTraitCollection].displayScale];
++#else
+   [mask setContentsScale:[UIScreen mainScreen].scale];
++#endif
+   CGMutablePathRef path = CGPathCreateMutable();
+   CGPathRef layerPath =
+       RCTPathCreateWithRoundedRect(shadowLayer.bounds, RCTGetCornerInsets(cornerRadii, UIEdgeInsetsZero), nil, NO);
+diff -ruN -x p rn862/package/React/React-RCTFBReactNativeSpecVisionOS.podspec vos/package/React/React-RCTFBReactNativeSpecVisionOS.podspec
+--- rn862/package/React/React-RCTFBReactNativeSpecVisionOS.podspec	1969-12-31 19:00:00
++++ vos/package/React/React-RCTFBReactNativeSpecVisionOS.podspec	1985-10-26 04:15:00
+@@ -0,0 +1,62 @@
++# Copyright © 2026 ReactVision
++#
++# This source code is licensed under the MIT license found in the
++# LICENSE file in the root directory of this source tree.
++
++require "json"
++
++# This Podspec wraps the code generated by Codegen for the visionOS Native Modules this package
++# adds on top of React Native. It is generated when the package is packed, not when an app installs
++# it, so it ships here rather than in the app's ReactCodegen pod.
++
++package = JSON.parse(File.read(File.join(__dir__, "..", "package.json")))
++version = package['version']
++
++source = { :git => 'https://github.com/ReactVision/react-native-visionos.git' }
++if version == '1000.0.0'
++  # This is an unpublished version, use the latest commit hash of the react-native repo, which we’re presumably in.
++  source[:commit] = `git rev-parse HEAD`.strip if system("git rev-parse --git-dir > /dev/null 2>&1")
++else
++  source[:tag] = "v#{version}"
++end
++
++header_search_paths = [
++  "\"$(PODS_TARGET_SRCROOT)/FBReactNativeSpec_visionOS\"",
++  "\"$(PODS_ROOT)/Headers/Private/Yoga\"",
++]
++
++new_arch_flags = ENV['RCT_NEW_ARCH_ENABLED'] == '1' ? ' -DRCT_NEW_ARCH_ENABLED=1' : ''
++
++Pod::Spec.new do |s|
++  s.name                   = "React-RCTFBReactNativeSpecVisionOS"
++  s.version                = version
++  s.summary                = "FBReactNativeSpec for the visionOS modules of React Native."
++  s.homepage               = "https://callstack.github.io/react-native-visionos-docs/"
++  s.license                = package["license"]
++  s.author                 = "Callstack"
++  s.platforms              = min_supported_versions
++  s.source                 = source
++  s.source_files           = "FBReactNativeSpec_visionOS/**/*.{c,h,m,mm,cpp}"
++  s.compiler_flags         = new_arch_flags
++  s.header_dir             = 'FBReactNativeSpec_visionOS'
++  s.pod_target_xcconfig    = {
++    "USE_HEADERMAP" => "NO",
++    "CLANG_CXX_LANGUAGE_STANDARD" => rct_cxx_language_standard(),
++    "HEADER_SEARCH_PATHS" => header_search_paths.join(' '),
++  }
++
++  resolve_use_frameworks(s, header_mappings_dir: 'FBReactNativeSpec_visionOS', module_name: "React_RCTFBReactNativeSpecVisionOS")
++
++  s.dependency "React-jsi"
++  s.dependency "RCTRequired"
++  s.dependency "RCTTypeSafety"
++  s.dependency "React-Core"
++  s.dependency "React-NativeModulesApple"
++
++  add_dependency(s, "ReactCommon", :subspec => "turbomodule/core", :additional_framework_paths => ["react/nativemodule/core"])
++  add_dependency(s, "ReactCommon", :subspec => "turbomodule/bridging", :additional_framework_paths => ["react/nativemodule/bridging"])
++
++  depend_on_js_engine(s)
++  add_rn_third_party_dependencies(s)
++  add_rncore_dependency(s)
++end
+diff -ruN -x p rn862/package/React/Views/RCTModalHostViewController.m vos/package/React/Views/RCTModalHostViewController.m
+--- rn862/package/React/Views/RCTModalHostViewController.m	1985-10-26 04:15:00
++++ vos/package/React/Views/RCTModalHostViewController.m	1985-10-26 04:15:00
+@@ -24,9 +24,12 @@
+     return nil;
+   }
+ 
++  self.modalInPresentation = YES;
++#if !TARGET_OS_VISION
+   _preferredStatusBarStyle = [RCTUIStatusBarManager() statusBarStyle];
+   _preferredStatusBarHidden = [RCTUIStatusBarManager() isStatusBarHidden];
+-
++#endif
++    
+   return self;
+ }
+ 
+diff -ruN -x p rn862/package/React/Views/RCTViewManager.h vos/package/React/Views/RCTViewManager.h
+--- rn862/package/React/Views/RCTViewManager.h	1985-10-26 04:15:00
++++ vos/package/React/Views/RCTViewManager.h	1985-10-26 04:15:00
+@@ -79,6 +79,25 @@
+     return @[ @ #type, @ #keyPath ];                    \
+   }
+ 
++#if TARGET_OS_VISION
++/**
++ * These macros allow properties to only be mapped in visionOS.
++ */
++#define RCT_EXPORT_NOT_VISIONOS_VIEW_PROPERTY(name, type)
++#define RCT_EXPORT_VISIONOS_VIEW_PROPERTY(name, type) \
++RCT_EXPORT_VIEW_PROPERTY(name, type)
++#define RCT_REMAP_NOT_VISIONOS_VIEW_PROPERTY(name, keyPath, type)
++#define RCT_REMAP_VISIONOS_VIEW_PROPERTY(name, keyPath, type) \
++RCT_REMAP_VIEW_PROPERTY(name, keyPath, type)
++#else
++#define RCT_EXPORT_NOT_VISIONOS_VIEW_PROPERTY(name, type) \
++RCT_EXPORT_VIEW_PROPERTY(name, type)
++#define RCT_EXPORT_VISIONOS_VIEW_PROPERTY(name, type)
++#define RCT_REMAP_NOT_VISIONOS_VIEW_PROPERTY(name, keyPath, type) \
++RCT_REMAP_VIEW_PROPERTY(name, keyPath, type)
++#define RCT_REMAP_VISIONOS_VIEW_PROPERTY(name, keyPath, type)
++#endif
++
+ /**
+  * This macro can be used when you need to provide custom logic for setting
+  * view properties. The macro should be followed by a method body, which can
+diff -ruN -x p rn862/package/React/Views/ScrollView/RCTScrollView.m vos/package/React/Views/ScrollView/RCTScrollView.m
+--- rn862/package/React/Views/ScrollView/RCTScrollView.m	1985-10-26 04:15:00
++++ vos/package/React/Views/ScrollView/RCTScrollView.m	1985-10-26 04:15:00
+@@ -323,11 +323,13 @@
+       // Text field active region is below visible area with keyboard - update diff to bring into view
+       contentDiff = endFrame.origin.y - focusEnd;
+     } else {
++#if !TARGET_OS_VISION
+       UIView *inputAccessoryView = _firstResponderViewOutsideScrollView.inputAccessoryView;
+       if (inputAccessoryView) {
+         // Text input view is within the inputAccessoryView.
+         contentDiff = endFrame.origin.y - beginFrame.origin.y;
+       }
++#endif
+     }
+   } else if (endFrame.origin.y <= beginFrame.origin.y) {
+     // Keyboard opened for other reason
+@@ -1079,7 +1081,9 @@
+ RCT_SET_AND_PRESERVE_OFFSET(setDecelerationRate, decelerationRate, CGFloat)
+ RCT_SET_AND_PRESERVE_OFFSET(setDirectionalLockEnabled, isDirectionalLockEnabled, BOOL)
+ RCT_SET_AND_PRESERVE_OFFSET(setIndicatorStyle, indicatorStyle, UIScrollViewIndicatorStyle)
++#if !TARGET_OS_VISION
+ RCT_SET_AND_PRESERVE_OFFSET(setKeyboardDismissMode, keyboardDismissMode, UIScrollViewKeyboardDismissMode)
++#endif
+ RCT_SET_AND_PRESERVE_OFFSET(setMaximumZoomScale, maximumZoomScale, CGFloat)
+ RCT_SET_AND_PRESERVE_OFFSET(setMinimumZoomScale, minimumZoomScale, CGFloat)
+ RCT_SET_AND_PRESERVE_OFFSET(setScrollEnabled, isScrollEnabled, BOOL)
+diff -ruN -x p rn862/package/React/Views/ScrollView/RCTScrollViewManager.h vos/package/React/Views/ScrollView/RCTScrollViewManager.h
+--- rn862/package/React/Views/ScrollView/RCTScrollViewManager.h	1985-10-26 04:15:00
++++ vos/package/React/Views/ScrollView/RCTScrollViewManager.h	1985-10-26 04:15:00
+@@ -10,12 +10,14 @@
+ 
+ #ifndef RCT_REMOVE_LEGACY_ARCH
+ 
++#if !TARGET_OS_VISION
+ __attribute__((deprecated("This API will be removed along with the legacy architecture.")))
+ @interface RCTConvert(UIScrollView)
+ 
+ + (UIScrollViewKeyboardDismissMode)UIScrollViewKeyboardDismissMode:(id)json;
+ 
+ @end
++#endif
+ 
+ __attribute__((deprecated("This API will be removed along with the legacy architecture.")))
+ @interface RCTScrollViewManager : RCTViewManager
+diff -ruN -x p rn862/package/React/Views/ScrollView/RCTScrollViewManager.m vos/package/React/Views/ScrollView/RCTScrollViewManager.m
+--- rn862/package/React/Views/ScrollView/RCTScrollViewManager.m	1985-10-26 04:15:00
++++ vos/package/React/Views/ScrollView/RCTScrollViewManager.m	1985-10-26 04:15:00
+@@ -16,6 +16,7 @@
+ 
+ @implementation RCTConvert (UIScrollView)
+ 
++#if !TARGET_OS_VISION
+ RCT_ENUM_CONVERTER(
+     UIScrollViewKeyboardDismissMode,
+     (@{
+@@ -27,6 +28,7 @@
+     }),
+     UIScrollViewKeyboardDismissModeNone,
+     integerValue)
++#endif
+ 
+ RCT_ENUM_CONVERTER(
+     UIScrollViewIndicatorStyle,
+@@ -73,7 +75,7 @@
+ RCT_EXPORT_VIEW_PROPERTY(endDraggingSensitivityMultiplier, CGFloat)
+ RCT_EXPORT_VIEW_PROPERTY(directionalLockEnabled, BOOL)
+ RCT_EXPORT_VIEW_PROPERTY(indicatorStyle, UIScrollViewIndicatorStyle)
+-RCT_EXPORT_VIEW_PROPERTY(keyboardDismissMode, UIScrollViewKeyboardDismissMode)
++RCT_EXPORT_NOT_VISIONOS_VIEW_PROPERTY(keyboardDismissMode, UIScrollViewKeyboardDismissMode)
+ RCT_EXPORT_VIEW_PROPERTY(maximumZoomScale, CGFloat)
+ RCT_EXPORT_VIEW_PROPERTY(minimumZoomScale, CGFloat)
+ RCT_EXPORT_VIEW_PROPERTY(scrollEnabled, BOOL)
+diff -ruN -x p rn862/package/React-Core.podspec vos/package/React-Core.podspec
+--- rn862/package/React-Core.podspec	1985-10-26 04:15:00
++++ vos/package/React-Core.podspec	1985-10-26 04:15:00
+@@ -28,6 +28,8 @@
+   'RCTSettingsHeaders'          => 'Libraries/Settings/*.h',
+   'RCTTextHeaders'              => 'Libraries/Text/**/*.h',
+   'RCTVibrationHeaders'         => 'Libraries/Vibration/*.h',
++  'RCTXRHeaders'                => 'Libraries/XR/*.h',
++  'RCTWindowManagerHeaders'     => 'Libraries/WindowManager/*.h',
+ }
+ 
+ frameworks_search_paths = []
+@@ -72,6 +74,8 @@
+       "React/DevSupport/**/*",
+       "React/Fabric/**/*",
+       "React/FBReactNativeSpec/**/*",
++      # Generated alongside FBReactNativeSpec and owned by its own pod, the same way.
++      "React/FBReactNativeSpec_visionOS/**/*",
+       "React/Tests/**/*",
+       "React/Inspector/**/*",
+       "React/Runtime/**/*",
+diff -ruN -x p rn862/package/React.podspec vos/package/React.podspec
+--- rn862/package/React.podspec	1985-10-26 04:15:00
++++ vos/package/React.podspec	1985-10-26 04:15:00
+@@ -53,4 +53,6 @@
+   s.dependency "React-RCTSettings", version
+   s.dependency "React-RCTText", version
+   s.dependency "React-RCTVibration", version
++  s.dependency "React-RCTXR", version
++  s.dependency "React-RCTWindowManager", version
+ end
+diff -ruN -x p rn862/package/ReactCommon/react/nativemodule/samples/platform/ios/ReactCommon/RCTSampleTurboModule.mm vos/package/ReactCommon/react/nativemodule/samples/platform/ios/ReactCommon/RCTSampleTurboModule.mm
+--- rn862/package/ReactCommon/react/nativemodule/samples/platform/ios/ReactCommon/RCTSampleTurboModule.mm	1985-10-26 04:15:00
++++ vos/package/ReactCommon/react/nativemodule/samples/platform/ios/ReactCommon/RCTSampleTurboModule.mm	1985-10-26 04:15:00
+@@ -34,8 +34,15 @@
+ 
+ - (void)initialize
+ {
++#if TARGET_OS_VISION
++  UIApplication *app = [[UIApplication class] performSelector:@selector(sharedApplication)];
++  UIWindowScene *scene = (UIWindowScene *)[app.connectedScenes anyObject];
++  UIWindow *window = [[UIWindow alloc] initWithWindowScene:scene];
++  CGSize screenSize = window.bounds.size;
++#else
+   UIScreen *mainScreen = UIScreen.mainScreen;
+   CGSize screenSize = mainScreen.bounds.size;
++#endif
+ 
+   _constants = facebook::react::typedConstants<JS::NativeSampleTurboModule::Constants>({
+       .const1 = YES,
+diff -ruN -x p rn862/package/index.js vos/package/index.js
+--- rn862/package/index.js	1985-10-26 04:15:00
++++ vos/package/index.js	1985-10-26 04:15:00
+@@ -347,6 +347,12 @@
+   get Share() {
+     return require('./Libraries/Share/Share').default;
+   },
++  get XR() {
++    return require('./Libraries/XR/XR').default;
++  },
++  get WindowManager() {
++    return require('./Libraries/WindowManager/WindowManager').default;
++  },
+   get StyleSheet() {
+     return require('./Libraries/StyleSheet/StyleSheet').default;
+   },
+diff -ruN -x p rn862/package/index.js.flow vos/package/index.js.flow
+--- rn862/package/index.js.flow	1985-10-26 04:15:00
++++ vos/package/index.js.flow	1985-10-26 04:15:00
+@@ -400,6 +400,8 @@
+ } from './Libraries/StyleSheet/StyleSheetTypes';
+ export type {Insets} from './Libraries/StyleSheet/Rect';
+ export {default as StyleSheet} from './Libraries/StyleSheet/StyleSheet';
++export {default as XR} from './Libraries/XR/XR';
++export {default as WindowManager} from './Libraries/WindowManager/WindowManager';
+ 
+ export * as Systrace from './Libraries/Performance/Systrace';
+ export {default as ToastAndroid} from './Libraries/Components/ToastAndroid/ToastAndroid';
+diff -ruN -x p rn862/package/local-cli/localCommands.js vos/package/local-cli/localCommands.js
+--- rn862/package/local-cli/localCommands.js	1969-12-31 19:00:00
++++ vos/package/local-cli/localCommands.js	1985-10-26 04:15:00
+@@ -0,0 +1,62 @@
++/**
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ *
++ * @flow strict-local
++ * @format
++ */
++
++'use strict';
++
++/*::
++import type {Command} from '@react-native-community/cli-types';
++ */
++
++const platformName = 'visionos';
++
++/**
++ * Builds the visionOS commands from an already resolved
++ * `@react-native-community/cli-platform-apple`. The caller owns resolution so
++ * that a project without the Apple platform package still gets a usable
++ * `react-native.config.js`.
++ */
++function createCommands(apple /*: $FlowFixMe */) /*: Array<Command> */ {
++  const run /*: Command */ = {
++    name: 'run-visionos',
++    description: 'builds your app and starts it on visionOS simulator',
++    func: apple.createRun({platformName}),
++    examples: [
++      {
++        desc: 'Run on a specific simulator',
++        cmd: 'npx react-native run-visionos --simulator "Apple Vision Pro"',
++      },
++    ],
++    options: apple.getRunOptions({platformName}),
++  };
++
++  const log /*: Command */ = {
++    name: 'log-visionos',
++    description: 'starts visionOS device syslog tail',
++    func: apple.createLog({platformName}),
++    options: apple.getLogOptions({platformName}),
++  };
++
++  const build /*: Command */ = {
++    name: 'build-visionos',
++    description: 'builds your app for visionOS platform',
++    func: apple.createBuild({platformName}),
++    examples: [
++      {
++        desc: 'Build the app for all visionOS devices in Release mode',
++        cmd: 'npx react-native build-visionos --mode "Release"',
++      },
++    ],
++    options: apple.getBuildOptions({platformName}),
++  };
++
++  return [run, log, build];
++}
++
++module.exports = {createCommands};
+diff -ruN -x p rn862/package/react-native.config.js vos/package/react-native.config.js
+--- rn862/package/react-native.config.js	1985-10-26 04:15:00
++++ vos/package/react-native.config.js	1985-10-26 04:15:00
+@@ -56,10 +56,14 @@
+ }
+ 
+ let ios;
++let apple;
+ try {
+   ios = findCommunityPlatformPackage(
+     '@react-native-community/cli-platform-ios',
+   );
++  apple = findCommunityPlatformPackage(
++    '@react-native-community/cli-platform-apple',
++  );
+ } catch {
+   if (verbose) {
+     console.warn(
+@@ -88,7 +92,7 @@
+     {
+       name: '--platform <string>',
+       description:
+-        'Target platform. Supported values: "android", "ios", "all".',
++        'Target platform. Supported values: "android", "ios", "visionos", "all".',
+       default: 'all',
+     },
+     {
+@@ -109,16 +113,27 @@
+       args.source,
+     ),
+ };
+-
+ commands.push(codegenCommand);
+ 
+ const config = {
+   commands,
+   platforms: {} /*:: as {[string]: Readonly<{
++      npmPackageName?: string,
+       projectConfig: unknown,
+       dependencyConfig: unknown,
+     }>} */,
+ };
++
++if (apple != null) {
++  config.commands.push(
++    ...require('./local-cli/localCommands').createCommands(apple),
++  );
++  config.platforms.visionos = {
++    npmPackageName: '@reactvision/react-native-visionos',
++    projectConfig: apple.getProjectConfig({platformName: 'visionos'}),
++    dependencyConfig: apple.getDependencyConfig({platformName: 'visionos'}),
++  };
++}
+ 
+ if (ios != null) {
+   config.commands.push(...ios.commands);
+diff -ruN -x p rn862/package/scripts/cocoapods/autolinking.rb vos/package/scripts/cocoapods/autolinking.rb
+--- rn862/package/scripts/cocoapods/autolinking.rb	1985-10-26 04:15:00
++++ vos/package/scripts/cocoapods/autolinking.rb	1985-10-26 04:15:00
+@@ -38,8 +38,22 @@
+   config = JSON.parse(json)
+ 
+   packages = config["dependencies"]
+-  ios_project_root = Pathname.new(config["project"]["ios"]["sourceDir"])
+   react_native_path = Pathname.new(config["reactNativePath"])
++
++  # Anchor everything to the Podfile being installed, not to the iOS one.
++  #
++  # `config["project"]["ios"]["sourceDir"]` is always `<app>/ios`, even when CocoaPods is
++  # installing in `visionos/`. Codegen looks for the manifest under the installation root, found
++  # nothing there, and fell back to scanning the app's package.json — where `react-native` and
++  # `@reactvision/react-native-visionos` both declare AccessibilityManager, Appearance, AppState,
++  # DeviceInfo, PlatformConstants and StatusBarManager, because the fork *is* React Native. The
++  # install then died on "declared in more than one libraries". Podspec paths below are relative
++  # to this root too, and want the same answer.
++  #
++  # For an iOS install the two are the same directory, so nothing changes there.
++  install_root = Pod::Config.instance.installation_root
++  ios_project_root = install_root ? Pathname.new(install_root.to_s)
++                                  : Pathname.new(config["project"]["ios"]["sourceDir"])
+   codegen_output_path = ios_project_root.join("build/generated/autolinking/autolinking.json")
+ 
+   # Write autolinking react-native-config output to codegen folder
+diff -ruN -x p rn862/package/scripts/cocoapods/helpers.rb vos/package/scripts/cocoapods/helpers.rb
+--- rn862/package/scripts/cocoapods/helpers.rb	1985-10-26 04:15:00
++++ vos/package/scripts/cocoapods/helpers.rb	1985-10-26 04:15:00
+@@ -83,6 +83,10 @@
+         def self.min_ios_version_supported
+             return '15.1'
+         end
++        
++        def self.min_visionos_version_supported
++            return '1.0'
++        end
+ 
+         def self.min_xcode_version_supported
+             return '16.1'
+diff -ruN -x p rn862/package/scripts/cocoapods/new_architecture.rb vos/package/scripts/cocoapods/new_architecture.rb
+--- rn862/package/scripts/cocoapods/new_architecture.rb	1985-10-26 04:15:00
++++ vos/package/scripts/cocoapods/new_architecture.rb	1985-10-26 04:15:00
+@@ -153,6 +153,17 @@
+         return package["version"]
+     end
+ 
++    # The version of React Native this package is based on. Its prebuilt artifacts are published by
++    # React Native under that version, not under this package's own — which moves independently.
++    def self.extract_react_native_upstream_version(react_native_path, file_manager: File, json_parser: JSON)
++        package_json_file = File.join(react_native_path, "package.json")
++        if !file_manager.exist?(package_json_file)
++            raise "Couldn't find the React Native package.json file at #{package_json_file}"
++        end
++        package = json_parser.parse(file_manager.read(package_json_file))
++        return package["reactNativeUpstreamVersion"]
++    end
++
+     # Deprecated method. This has been restored because some libraries (e.g. react-native-exit-app) still use it.
+     def self.folly_compiler_flags
+       folly_config = Helpers::Constants.folly_config
+diff -ruN -x p rn862/package/scripts/cocoapods/utils.rb vos/package/scripts/cocoapods/utils.rb
+--- rn862/package/scripts/cocoapods/utils.rb	1985-10-26 04:15:00
++++ vos/package/scripts/cocoapods/utils.rb	1985-10-26 04:15:00
+@@ -655,6 +655,7 @@
+             "glog",
+             "hermes-engine",
+             "React-hermes",
++            "React-RCTXR", # visionOS
+         ]
+         if ENV['USE_THIRD_PARTY_JSC'] != '1'
+             pods << "React-jsc"
+diff -ruN -x p rn862/package/scripts/codegen/generate-artifacts-executor/constants.js vos/package/scripts/codegen/generate-artifacts-executor/constants.js
+--- rn862/package/scripts/codegen/generate-artifacts-executor/constants.js	1985-10-26 04:15:00
++++ vos/package/scripts/codegen/generate-artifacts-executor/constants.js	1985-10-26 04:15:00
+@@ -46,6 +46,17 @@
+       'codegen',
+     ) /*:: as string */,
+   },
++  // The visionOS modules this package adds. They ship pre-generated like FBReactNativeSpec does,
++  // so the apps that consume them never have to generate the spec themselves — which an app cannot
++  // do reliably: once autolinking has run, codegen only looks at the autolinked dependencies, and
++  // React Native is not one of them. There is no Android counterpart.
++  FBReactNativeSpec_visionOS: {
++    ios: path.join(
++      REACT_NATIVE_PACKAGE_ROOT_FOLDER,
++      'React',
++      'FBReactNativeSpec_visionOS',
++    ) /*:: as string */,
++  },
+ };
+ 
+ const packageJsonPath = path.join(
+diff -ruN -x p rn862/package/scripts/codegen/generate-artifacts-executor/generateFBReactNativeSpecIOS.js vos/package/scripts/codegen/generate-artifacts-executor/generateFBReactNativeSpecIOS.js
+--- rn862/package/scripts/codegen/generate-artifacts-executor/generateFBReactNativeSpecIOS.js	1985-10-26 04:15:00
++++ vos/package/scripts/codegen/generate-artifacts-executor/generateFBReactNativeSpecIOS.js	1985-10-26 04:15:00
+@@ -22,10 +22,10 @@
+   const platform = 'ios';
+   buildCodegenIfNeeded();
+   const pkgJson = readPkgJsonInDirectory(projectRoot);
+-  const fbReactNativeSpecLib = findProjectRootLibraries(
+-    pkgJson,
+-    projectRoot,
+-  ).filter(library => library.config.name === 'FBReactNativeSpec')[0];
++  const libraries = findProjectRootLibraries(pkgJson, projectRoot);
++  const fbReactNativeSpecLib = libraries.filter(
++    library => library.config.name === 'FBReactNativeSpec',
++  )[0];
+   if (!fbReactNativeSpecLib) {
+     throw new Error(
+       "[Codegen] Can't find FBReactNativeSpec library. Failed to generate artifacts",
+@@ -36,6 +36,20 @@
+     platform,
+   );
+   generateCode('', fbReactNativeSchemaInfo, false, platform);
++
++  // The visionOS modules are generated here too, so they ship with the package instead of relying
++  // on the app to generate them.
++  const visionOSSpecLib = libraries.filter(
++    library => library.config.name === 'FBReactNativeSpec_visionOS',
++  )[0];
++  if (visionOSSpecLib) {
++    generateCode(
++      '',
++      generateSchemaInfo(visionOSSpecLib, platform),
++      false,
++      platform,
++    );
++  }
+ }
+ 
+ module.exports = {
+diff -ruN -x p rn862/package/scripts/codegen/generate-artifacts-executor/generateNativeCode.js vos/package/scripts/codegen/generate-artifacts-executor/generateNativeCode.js
+--- rn862/package/scripts/codegen/generate-artifacts-executor/generateNativeCode.js	1985-10-26 04:15:00
++++ vos/package/scripts/codegen/generate-artifacts-executor/generateNativeCode.js	1985-10-26 04:15:00
+@@ -44,7 +44,7 @@
+ ) {
+   if (shouldSkipGenerationForFBReactNativeSpec(schemaInfo, platform)) {
+     codegenLog(
+-      '[Codegen - FBReactNativeSpec] Skipping iOS code generation for FBReactNativeSpec as it has been generated already.',
++      `[Codegen - FBReactNativeSpec] Skipping iOS code generation for ${schemaInfo.library.config.name} as it has been generated already.`,
+       true,
+     );
+     return;
+@@ -89,15 +89,17 @@
+   schemaInfo /*: $FlowFixMe */,
+   platform /*: string */,
+ ) {
++  const libraryName = schemaInfo.library.config.name;
+   if (
+     platform !== 'ios' ||
+-    schemaInfo.library.config.name !== 'FBReactNativeSpec'
++    (libraryName !== 'FBReactNativeSpec' &&
++      libraryName !== 'FBReactNativeSpec_visionOS')
+   ) {
+     return false;
+   }
+ 
+   const fbReactNativeSpecOutputPath =
+-    CORE_LIBRARIES_WITH_OUTPUT_FOLDER.FBReactNativeSpec.ios;
++    CORE_LIBRARIES_WITH_OUTPUT_FOLDER[libraryName].ios;
+   const fbReactNativeSpecAbsolutePath = path.resolve(
+     fbReactNativeSpecOutputPath,
+   );
+diff -ruN -x p rn862/package/scripts/codegen/generate-artifacts-executor/utils.js vos/package/scripts/codegen/generate-artifacts-executor/utils.js
+--- rn862/package/scripts/codegen/generate-artifacts-executor/utils.js	1985-10-26 04:15:00
++++ vos/package/scripts/codegen/generate-artifacts-executor/utils.js	1985-10-26 04:15:00
+@@ -225,6 +225,32 @@
+   });
+ }
+ 
++// Reads the `name` declared by the package a dependency resolves to, which is not necessarily the
++// name it is installed under: an alias installs a package under any name the app picks.
++function readPackageNameOf(
++  dependency /*: string */,
++  projectRoot /*: string */,
++) /*: ?string */ {
++  let packageJsonPath;
++  try {
++    packageJsonPath = require.resolve(path.join(dependency, 'package.json'), {
++      paths: [projectRoot],
++    });
++  } catch {
++    packageJsonPath = path.join(
++      projectRoot,
++      'node_modules',
++      dependency,
++      'package.json',
++    );
++  }
++  try {
++    return JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).name;
++  } catch {
++    return null;
++  }
++}
++
+ function findExternalLibraries(
+   pkgJson /*: $FlowFixMe */,
+   projectRoot /*: string */,
+@@ -239,8 +265,45 @@
+     'Searching for codegen-enabled libraries in the project dependencies.',
+     true,
+   );
++  // This package IS React Native. An out-of-tree platform requires it to be installed alongside
++  // upstream `react-native` — the app still builds iOS and Android from that one — and both declare
++  // the same turbo modules (AccessibilityManager, Appearance, AppState, DeviceInfo,
++  // PlatformConstants, StatusBarManager). Library identity below is the *package* name, so the two
++  // read as different libraries claiming the same modules and the conflict check rejects the pair,
++  // killing `pod install`.
++  //
++  // Upstream's copy is skipped: for this build, React Native is this package. Skipping the scan
++  // altogether would also silence the conflict, and was tried — it loses this package's own
++  // visionOS-only codegen library (FBReactNativeSpec_visionOS), and the build then fails much later
++  // on a missing generated header.
++  //
++  // An app may also install this package *as* `react-native`, through a dependency alias. There is
++  // then no upstream copy to skip: the `react-native` entry resolves to this very package, and
++  // skipping it drops the visionOS library just the same. So the entry is compared by the name in
++  // the package.json it resolves to, not by the name it is installed under.
++  const selfPkgName = JSON.parse(
++    fs.readFileSync(
++      path.join(__dirname, '..', '..', '..', 'package.json'),
++      'utf8',
++    ),
++  ).name;
++  const resolvedReactNativeName = readPackageNameOf(
++    'react-native',
++    projectRoot,
++  );
++  const skipUpstreamReactNative =
++    selfPkgName !== 'react-native' &&
++    dependencies['react-native'] != null &&
++    resolvedReactNativeName !== selfPkgName;
++
+   // Handle third-party libraries
+   return Object.keys(dependencies).flatMap(dependency => {
++    if (skipUpstreamReactNative && dependency === 'react-native') {
++      codegenLog(
++        `Skipping upstream react-native: ${selfPkgName} is React Native for this build.`,
++      );
++      return [];
++    }
+     let configFilePath = '';
+     try {
+       configFilePath = require.resolve(path.join(dependency, 'package.json'), {
+diff -ruN -x p rn862/package/scripts/react-native-xcode.sh vos/package/scripts/react-native-xcode.sh
+--- rn862/package/scripts/react-native-xcode.sh	1985-10-26 04:15:00
++++ vos/package/scripts/react-native-xcode.sh	1985-10-26 04:15:00
+@@ -157,6 +157,7 @@
+   --entry-file "$ENTRY_FILE" \
+   --platform "$BUNDLE_PLATFORM" \
+   --dev $DEV \
++  --resolver-option "platformExtension=visionos" \
+   --reset-cache \
+   --bundle-output "$BUNDLE_FILE" \
+   --assets-dest "$DEST" \
+diff -ruN -x p rn862/package/scripts/react_native_pods.rb vos/package/scripts/react_native_pods.rb
+--- rn862/package/scripts/react_native_pods.rb	1985-10-26 04:15:00
++++ vos/package/scripts/react_native_pods.rb	1985-10-26 04:15:00
+@@ -35,11 +35,15 @@
+   return Helpers::Constants.min_ios_version_supported
+ end
+ 
++def min_visionos_version_supported
++  return Helpers::Constants.min_visionos_version_supported
++end
++
+ # This function returns the min supported OS versions supported by React Native
+ # By using this function, you won't have to manually change your Podfile
+ # when we change the minimum version supported by the framework.
+ def min_supported_versions
+-  return  { :ios => min_ios_version_supported }
++  return  { :ios => min_ios_version_supported, :visionos => min_visionos_version_supported }
+ end
+ 
+ # This function prepares the project for React Native, before processing
+@@ -119,11 +123,17 @@
+ 
+   ReactNativePodsUtils.warn_if_not_on_arm64()
+ 
++  # The prebuilt Core and Dependencies artifacts are published by React Native, under the version
++  # this package is based on. This package releases patch versions of its own on top of that one,
++  # and nothing is published under those — asking Maven for one finds nothing, and the whole build
++  # quietly falls back to compiling React Native from source.
++  artifacts_version = NewArchitectureHelper.extract_react_native_upstream_version(react_native_path) || react_native_version
++
+   # Update ReactNativeDependencies so that we can easily switch between source and prebuilt
+-  ReactNativeDependenciesUtils.setup_react_native_dependencies(prefix, react_native_version)
++  ReactNativeDependenciesUtils.setup_react_native_dependencies(prefix, artifacts_version)
+ 
+   # Update ReactNativeCoreUtils so that we can easily switch between source and prebuilt
+-  ReactNativeCoreUtils.setup_rncore(prefix, react_native_version)
++  ReactNativeCoreUtils.setup_rncore(prefix, artifacts_version)
+ 
+   Pod::UI.puts "Configuring the target with the New Architecture\n"
+ 
+@@ -169,6 +179,10 @@
+   pod 'React-jsi', :path => "#{prefix}/ReactCommon/jsi"
+   pod 'RCTSwiftUI', :path => "#{prefix}/ReactApple/RCTSwiftUI"
+   pod 'RCTSwiftUIWrapper', :path => "#{prefix}/ReactApple/RCTSwiftUIWrapper"
++  pod 'React-RCTSwiftExtensions', :path => "#{prefix}/Libraries/SwiftExtensions"
++  pod 'React-RCTFBReactNativeSpecVisionOS', :path => "#{prefix}/React", :modular_headers => true
++  pod 'React-RCTXR', :path => "#{prefix}/Libraries/XR"
++  pod 'React-RCTWindowManager', :path => "#{prefix}/Libraries/WindowManager", :modular_headers => true
+ 
+   if hermes_enabled
+     setup_hermes!(:react_native_path => prefix)
+diff -ruN -x p rn862/package/sdks/hermes-engine/hermes-engine.podspec vos/package/sdks/hermes-engine/hermes-engine.podspec
+--- rn862/package/sdks/hermes-engine/hermes-engine.podspec	1985-10-26 04:15:00
++++ vos/package/sdks/hermes-engine/hermes-engine.podspec	1985-10-26 04:15:00
+@@ -187,7 +187,8 @@
+           :name => '[RN] [2] Build Hermes',
+           :input_files => ["#{hermesc_path}/ImportHostCompilers.cmake"],
+           :output_files => [
+-            "${PODS_ROOT}/hermes-engine/build/iphonesimulator/API/hermes/hermesvm.framework/hermesvm"
++            "${PODS_ROOT}/hermes-engine/build/iphonesimulator/API/hermes/hermesvm.framework/hermesvm",
++            "${PODS_ROOT}/hermes-engine/build/xrsimulator/API/hermes/hermesvm.framework/hermesvm",
+           ],
+           :script => <<-EOS
+           . "${REACT_NATIVE_PATH}/scripts/xcode/with-environment.sh"
+diff -ruN -x p rn862/package/sdks/hermes-engine/utils/build-hermesc-xcode.sh vos/package/sdks/hermes-engine/utils/build-hermesc-xcode.sh
+--- rn862/package/sdks/hermes-engine/utils/build-hermesc-xcode.sh	1985-10-26 04:15:00
++++ vos/package/sdks/hermes-engine/utils/build-hermesc-xcode.sh	1985-10-26 04:15:00
+@@ -9,6 +9,21 @@
+ hermesc_dir_path="$1"; shift
+ jsi_path="$1"
+ 
++
++# VisionOS support has been added to CMake from version 3.28.0 onwards. Error out if the version is lower.
++function check_cmake_version {
++  required_version="3.28.0"
++  cmake_version=$($CMAKE_BINARY --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
++
++  if ! printf "%s\n%s\n" "$required_version" "$cmake_version" | sort -V | head -n 1 | grep -q "$required_version"; then
++    echo "error: CMake version $required_version or higher is required. Found: $cmake_version"
++    exit 1
++  fi
++}
++
++check_cmake_version
++
++
+ # This script is supposed to be executed from Xcode "run script" phase.
+ # Xcode sets up its build environment based on the build target (iphone, iphonesimulator, macosx).
+ # We want to make sure that hermesc is built for mac.
+diff -ruN -x p rn862/package/types/index.d.ts vos/package/types/index.d.ts
+--- rn862/package/types/index.d.ts	1985-10-26 04:15:00
++++ vos/package/types/index.d.ts	1985-10-26 04:15:00
+@@ -151,6 +151,8 @@
+ export * from '../Libraries/Utilities/PixelRatio';
+ export * from '../Libraries/Utilities/Platform';
+ export * from '../Libraries/Vibration/Vibration';
++export * from '../Libraries/XR/XR';
++export * from '../Libraries/WindowManager/WindowManager';
+ export * from '../Libraries/vendor/core/ErrorUtils';
+ export {
+   EmitterSubscription,
+diff -ruN -x p rn862/package/types/tsconfig.json vos/package/types/tsconfig.json
+--- rn862/package/types/tsconfig.json	1985-10-26 04:15:00
++++ vos/package/types/tsconfig.json	1985-10-26 04:15:00
+@@ -10,6 +10,6 @@
+     "jsx": "react",
+     "noEmit": true,
+     "forceConsistentCasingInFileNames": true,
+-    "paths": {"react-native": ["."]}
++    "paths": {"react-native": ["."], "react-native/*": ["../*"]}
+   }
+ }
+diff -ruN -x p rn862/package/types_generated/Libraries/WindowManager/WindowManager.d.ts vos/package/types_generated/Libraries/WindowManager/WindowManager.d.ts
+--- rn862/package/types_generated/Libraries/WindowManager/WindowManager.d.ts	1969-12-31 19:00:00
++++ vos/package/types_generated/Libraries/WindowManager/WindowManager.d.ts	1985-10-26 04:15:00
+@@ -0,0 +1,26 @@
++/**
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ *
++ * @generated SignedSource<<2fb0b5f93b3352a5d3840c070c526fd0>>
++ *
++ * This file was translated from Flow by scripts/js-api/build-types/index.js.
++ * Original file: packages/react-native/Libraries/WindowManager/WindowManager.js
++ */
++
++declare const WindowManager: {
++  getWindow: (id: string) => Window;
++  get supportsMultipleScenes(): boolean;
++};
++declare class Window {
++  id: string;
++  constructor(id: string);
++  open(props: null | undefined | Object): Promise<void>;
++  close(): Promise<void>;
++  update(props: null | undefined | Object): Promise<void>;
++}
++declare const $$WindowManager: typeof WindowManager;
++declare type $$WindowManager = typeof $$WindowManager;
++export default $$WindowManager;
+diff -ruN -x p rn862/package/types_generated/Libraries/XR/XR.d.ts vos/package/types_generated/Libraries/XR/XR.d.ts
+--- rn862/package/types_generated/Libraries/XR/XR.d.ts	1969-12-31 19:00:00
++++ vos/package/types_generated/Libraries/XR/XR.d.ts	1985-10-26 04:15:00
+@@ -0,0 +1,19 @@
++/**
++ * Copyright (c) Meta Platforms, Inc. and affiliates.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ *
++ * @generated SignedSource<<d661ba30f03bbc946739cf6341bd214f>>
++ *
++ * This file was translated from Flow by scripts/js-api/build-types/index.js.
++ * Original file: packages/react-native/Libraries/XR/XR.js
++ */
++
++declare const XR: {
++  requestSession: (sessionId: string, userInfo: null | undefined | Object) => Promise<void>;
++  endSession: () => Promise<void>;
++};
++declare const $$XR: typeof XR;
++declare type $$XR = typeof $$XR;
++export default $$XR;
+diff -ruN -x p rn862/package/types_generated/index.d.ts vos/package/types_generated/index.d.ts
+--- rn862/package/types_generated/index.d.ts	1985-10-26 04:15:00
++++ vos/package/types_generated/index.d.ts	1985-10-26 04:15:00
+@@ -4,7 +4,7 @@
+  * This source code is licensed under the MIT license found in the
+  * LICENSE file in the root directory of this source tree.
+  *
+- * @generated SignedSource<<f9975a429e8a05b8afdcc22828fd0d4b>>
++ * @generated SignedSource<<320683efe34a2a900ceb5de08cd7e100>>
+  *
+  * This file was translated from Flow by scripts/js-api/build-types/index.js.
+  * Original file: packages/react-native/index.js.flow
+@@ -141,6 +141,8 @@
+ export type { BoxShadowValue, CursorValue, DimensionValue, DropShadowValue, EdgeInsetsValue, PointValue } from "./Libraries/StyleSheet/StyleSheetTypes";
+ export type { Insets } from "./Libraries/StyleSheet/Rect";
+ export { default as StyleSheet } from "./Libraries/StyleSheet/StyleSheet";
++export { default as XR } from "./Libraries/XR/XR";
++export { default as WindowManager } from "./Libraries/WindowManager/WindowManager";
+ export * as Systrace from "./Libraries/Performance/Systrace";
+ export { default as ToastAndroid } from "./Libraries/Components/ToastAndroid/ToastAndroid";
+ export * as TurboModuleRegistry from "./Libraries/TurboModule/TurboModuleRegistry";
+diff -ruN -x p rn862/package/visionos_modules/NativeWindowManager.js vos/package/visionos_modules/NativeWindowManager.js
+--- rn862/package/visionos_modules/NativeWindowManager.js	1969-12-31 19:00:00
++++ vos/package/visionos_modules/NativeWindowManager.js	1985-10-26 04:15:00
+@@ -0,0 +1,24 @@
++/**
++ * @flow strict
++ * @format
++ */
++
++import type {TurboModule} from '../Libraries/TurboModule/RCTExport';
++
++import * as TurboModuleRegistry from '../Libraries/TurboModule/TurboModuleRegistry';
++
++export type WindowManagerConstants = {|
++  +supportsMultipleScenes?: boolean,
++|};
++
++export interface Spec extends TurboModule {
++  +getConstants: () => WindowManagerConstants;
++
++  // $FlowFixMe[unclear-type]
++  +openWindow: (windowId: string, userInfo: Object) => Promise<void>;
++  // $FlowFixMe[unclear-type]
++  +updateWindow: (windowId: string, userInfo: Object) => Promise<void>;
++  +closeWindow: (windowId: string) => Promise<void>;
++}
++
++export default (TurboModuleRegistry.get<Spec>('WindowManager'): ?Spec);
+diff -ruN -x p rn862/package/visionos_modules/NativeXRModule.js vos/package/visionos_modules/NativeXRModule.js
+--- rn862/package/visionos_modules/NativeXRModule.js	1969-12-31 19:00:00
++++ vos/package/visionos_modules/NativeXRModule.js	1985-10-26 04:15:00
+@@ -0,0 +1,16 @@
++/**
++ * @flow strict
++ * @format
++ */
++
++import type {TurboModule} from '../Libraries/TurboModule/RCTExport';
++
++import * as TurboModuleRegistry from '../Libraries/TurboModule/TurboModuleRegistry';
++
++export interface Spec extends TurboModule {
++  // $FlowFixMe[unclear-type]
++  +requestSession: (sessionId?: string, userInfo: Object) => Promise<void>;
++  +endSession: () => Promise<void>;
++}
++
++export default (TurboModuleRegistry.get<Spec>('XRModule'): ?Spec);

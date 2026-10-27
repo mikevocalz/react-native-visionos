@@ -34,8 +34,15 @@ RCT_EXPORT_MODULE()
 
 - (void)initialize
 {
+#if TARGET_OS_VISION
+  UIApplication *app = [[UIApplication class] performSelector:@selector(sharedApplication)];
+  UIWindowScene *scene = (UIWindowScene *)[app.connectedScenes anyObject];
+  UIWindow *window = [[UIWindow alloc] initWithWindowScene:scene];
+  CGSize screenSize = window.bounds.size;
+#else
   UIScreen *mainScreen = UIScreen.mainScreen;
   CGSize screenSize = mainScreen.bounds.size;
+#endif
 
   _constants = facebook::react::typedConstants<JS::NativeSampleTurboModule::Constants>({
       .const1 = YES,

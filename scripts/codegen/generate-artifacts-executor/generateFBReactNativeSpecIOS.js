@@ -22,10 +22,10 @@ function generateFBReactNativeSpecIOS(projectRoot /*: string */) /*: void*/ {
   const platform = 'ios';
   buildCodegenIfNeeded();
   const pkgJson = readPkgJsonInDirectory(projectRoot);
-  const fbReactNativeSpecLib = findProjectRootLibraries(
-    pkgJson,
-    projectRoot,
-  ).filter(library => library.config.name === 'FBReactNativeSpec')[0];
+  const libraries = findProjectRootLibraries(pkgJson, projectRoot);
+  const fbReactNativeSpecLib = libraries.filter(
+    library => library.config.name === 'FBReactNativeSpec',
+  )[0];
   if (!fbReactNativeSpecLib) {
     throw new Error(
       "[Codegen] Can't find FBReactNativeSpec library. Failed to generate artifacts",
@@ -36,6 +36,20 @@ function generateFBReactNativeSpecIOS(projectRoot /*: string */) /*: void*/ {
     platform,
   );
   generateCode('', fbReactNativeSchemaInfo, false, platform);
+
+  // The visionOS modules are generated here too, so they ship with the package instead of relying
+  // on the app to generate them.
+  const visionOSSpecLib = libraries.filter(
+    library => library.config.name === 'FBReactNativeSpec_visionOS',
+  )[0];
+  if (visionOSSpecLib) {
+    generateCode(
+      '',
+      generateSchemaInfo(visionOSSpecLib, platform),
+      false,
+      platform,
+    );
+  }
 }
 
 module.exports = {

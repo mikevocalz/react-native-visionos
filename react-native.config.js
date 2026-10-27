@@ -58,9 +58,13 @@ try {
 }
 
 let ios;
+let apple;
 try {
   ios = findCommunityPlatformPackage(
     '@react-native-community/cli-platform-ios',
+  );
+  apple = findCommunityPlatformPackage(
+    '@react-native-community/cli-platform-apple',
   );
 } catch {
   if (verbose) {
@@ -84,10 +88,22 @@ commands.push(bundleCommand, startCommand, spmCommand, codegenCommand);
 const config = {
   commands,
   platforms: {} /*:: as {[string]: Readonly<{
+      npmPackageName?: string,
       projectConfig: unknown,
       dependencyConfig: unknown,
     }>} */,
 };
+
+if (apple != null) {
+  config.commands.push(
+    ...require('./local-cli/localCommands').createCommands(apple),
+  );
+  config.platforms.visionos = {
+    npmPackageName: '@reactvision/react-native-visionos',
+    projectConfig: apple.getProjectConfig({platformName: 'visionos'}),
+    dependencyConfig: apple.getDependencyConfig({platformName: 'visionos'}),
+  };
+}
 
 if (ios != null) {
   config.commands.push(...ios.commands);

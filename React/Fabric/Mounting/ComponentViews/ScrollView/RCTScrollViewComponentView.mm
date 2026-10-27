@@ -34,6 +34,7 @@ static NSString *kOnScrollEndEvent = @"onScrollEnded";
 
 static const CGFloat kClippingLeeway = 44.0;
 
+#if !TARGET_OS_VISION
 static UIScrollViewKeyboardDismissMode RCTUIKeyboardDismissModeFromProps(const ScrollViewProps &props)
 {
   switch (props.keyboardDismissMode) {
@@ -45,6 +46,7 @@ static UIScrollViewKeyboardDismissMode RCTUIKeyboardDismissModeFromProps(const S
       return UIScrollViewKeyboardDismissModeInteractive;
   }
 }
+#endif
 
 static UIScrollViewIndicatorStyle RCTUIScrollViewIndicatorStyleFromProps(const ScrollViewProps &props)
 {
@@ -450,9 +452,11 @@ static inline UIViewAnimationOptions animationOptionsWithCurve(UIViewAnimationCu
   MAP_SCROLL_VIEW_PROP(disableIntervalMomentum);
   MAP_SCROLL_VIEW_PROP(snapToInterval);
 
+#if !TARGET_OS_VISION
   if (oldScrollViewProps.keyboardDismissMode != newScrollViewProps.keyboardDismissMode) {
     scrollView.keyboardDismissMode = RCTUIKeyboardDismissModeFromProps(newScrollViewProps);
   }
+#endif
 
   [super updateProps:props oldProps:oldProps];
 }

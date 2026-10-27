@@ -28,6 +28,8 @@ header_subspecs = {
   'RCTSettingsHeaders'          => 'Libraries/Settings/*.h',
   'RCTTextHeaders'              => 'Libraries/Text/**/*.h',
   'RCTVibrationHeaders'         => 'Libraries/Vibration/*.h',
+  'RCTXRHeaders'                => 'Libraries/XR/*.h',
+  'RCTWindowManagerHeaders'     => 'Libraries/WindowManager/*.h',
 }
 
 frameworks_search_paths = []
@@ -71,6 +73,8 @@ Pod::Spec.new do |s|
       "React/DevSupport/**/*",
       "React/Fabric/**/*",
       "React/FBReactNativeSpec/**/*",
+      # Generated alongside FBReactNativeSpec and owned by its own pod, the same way.
+      "React/FBReactNativeSpec_visionOS/**/*",
       "React/Tests/**/*",
       "React/Inspector/**/*",
       "React/Runtime/**/*",

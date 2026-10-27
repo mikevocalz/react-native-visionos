@@ -19,6 +19,7 @@ import type {KeyboardEvent, KeyboardMetrics} from './Keyboard';
 import LayoutAnimation from '../../LayoutAnimation/LayoutAnimation';
 import StyleSheet from '../../StyleSheet/StyleSheet';
 import Platform from '../../Utilities/Platform';
+import warnOnce from '../../Utilities/warnOnce';
 import {type EventSubscription} from '../../vendor/emitter/EventEmitter';
 import AccessibilityInfo from '../AccessibilityInfo/AccessibilityInfo';
 import View from '../View/View';
@@ -205,6 +206,13 @@ class KeyboardAvoidingView extends React.Component<
     }
 
     if (Platform.OS === 'ios') {
+      if (Platform.isVision === true) {
+        warnOnce(
+          'KeyboardAvoidingView-unavailable',
+          'KeyboardAvoidingView is not available on visionOS platform. The system displays the keyboard in a separate window, leaving the app’s window unaffected by the keyboard’s appearance and disappearance',
+        );
+        return;
+      }
       this._subscriptions = [
         // When undocked, split or floating, iOS will emit
         // UIKeyboardWillHideNotification notification.
@@ -241,6 +249,16 @@ class KeyboardAvoidingView extends React.Component<
       onLayout,
       ...props
     } = this.props;
+
+    if (Platform.isVision === true) {
+      // KeyboardAvoidingView is not supported on VisionOS, so we return a simple View without the onLayout handler
+      return (
+        <View ref={this.viewRef} style={style} {...props}>
+          {children}
+        </View>
+      );
+    }
+
     const bottomHeight = enabled === true ? this.state.bottom : 0;
     switch (behavior) {
       case 'height':

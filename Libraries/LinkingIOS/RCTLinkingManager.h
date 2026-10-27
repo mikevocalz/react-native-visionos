@@ -41,6 +41,8 @@
     continueUserActivity:(nonnull NSUserActivity *)userActivity
       restorationHandler:(nonnull void (^)(NSArray<id<UIUserActivityRestoring>> *_Nullable))restorationHandler;
 
++ (void)onOpenURL:(nonnull NSURL *)url NS_SWIFT_NAME(onOpenURL(url:));
+
 #pragma mark - SceneDelegate methods
 
 /// Handles user activity for scene-based apps. Invoke from your SceneDelegate.

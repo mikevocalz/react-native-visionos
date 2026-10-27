@@ -187,7 +187,7 @@
   RCTSurfaceHostingProxyRootView *surfaceHostingProxyRootView =
       [[RCTSurfaceHostingProxyRootView alloc] initWithSurface:surface];
 
-#if TARGET_OS_TV
+#if TARGET_OS_TV || TARGET_OS_VISION
   surfaceHostingProxyRootView.backgroundColor = [UIColor clearColor];
 #else
   surfaceHostingProxyRootView.backgroundColor = [UIColor systemBackgroundColor];

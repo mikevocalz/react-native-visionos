@@ -46,6 +46,17 @@ const CORE_LIBRARIES_WITH_OUTPUT_FOLDER /*: {[string]: $FlowFixMe} */ = {
       'codegen',
     ) /*:: as string */,
   },
+  // The visionOS modules this package adds. They ship pre-generated like FBReactNativeSpec does,
+  // so the apps that consume them never have to generate the spec themselves — which an app cannot
+  // do reliably: once autolinking has run, codegen only looks at the autolinked dependencies, and
+  // React Native is not one of them. There is no Android counterpart.
+  FBReactNativeSpec_visionOS: {
+    ios: path.join(
+      REACT_NATIVE_PACKAGE_ROOT_FOLDER,
+      'React',
+      'FBReactNativeSpec_visionOS',
+    ) /*:: as string */,
+  },
 };
 
 const packageJsonPath = path.join(

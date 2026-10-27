@@ -473,9 +473,15 @@ RCT_EXPORT_MODULE()
 {
   return ^(__unused UIAlertAction *action) {
     if (item != nullptr) {
+#if TARGET_OS_VISION
+      /// Execute this handler after the action sheet is dismissed to properly retrieve window when using SwiftUI entry point.
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0), dispatch_get_main_queue(), ^{
+        [item callHandler];
+      });
+#else
       [item callHandler];
+#endif
     }
-
     self->_actionSheet = nil;
   };
 }

@@ -193,26 +193,34 @@ static NSDictionary *RCTExportedDimensions(CGFloat fontScale)
 {
   RCTAssertMainQueue();
   UIWindow *mainWindow = RCTKeyWindow();
+#if TARGET_OS_VISION
+  // visionOS has no UIScreen: report the window for both, at the trait scale.
+  CGFloat scale = [UITraitCollection currentTraitCollection].displayScale;
+  CGSize windowSize = mainWindow != nil ? mainWindow.bounds.size : CGSizeZero;
+  CGSize screenSize = windowSize;
+#else
   UIScreen *screen = mainWindow.screen;
   if (screen == nil) {
     screen = UIScreen.screens.firstObject;
   }
   CGSize screenSize = screen.bounds.size;
+  CGFloat scale = screen.scale;
 
   // We fallback to screen size if a key window is not found.
   CGSize windowSize = mainWindow != nil ? mainWindow.bounds.size : screenSize;
+#endif
 
   NSDictionary<NSString *, NSNumber *> *dimsWindow = @{
     @"width" : @(windowSize.width),
     @"height" : @(windowSize.height),
-    @"scale" : @(screen.scale),
+    @"scale" : @(scale),
     @"fontScale" : @(fontScale)
   };
 
   NSDictionary<NSString *, NSNumber *> *dimsScreen = @{
     @"width" : @(screenSize.width),
     @"height" : @(screenSize.height),
-    @"scale" : @(screen.scale),
+    @"scale" : @(scale),
     @"fontScale" : @(fontScale)
   };
   return @{@"window" : dimsWindow, @"screen" : dimsScreen};

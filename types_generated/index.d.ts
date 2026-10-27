@@ -147,6 +147,8 @@ export type { BoxShadowValue, CursorValue, DimensionValue, DropShadowValue, Edge
 export type { EdgeInsetsProp } from "./Libraries/StyleSheet/EdgeInsetsPropType";
 export type { Insets } from "./Libraries/StyleSheet/Rect";
 export { default as StyleSheet } from "./Libraries/StyleSheet/StyleSheet";
+export { default as XR } from "./Libraries/XR/XR";
+export { default as WindowManager } from "./Libraries/WindowManager/WindowManager";
 export * as Systrace from "./Libraries/Performance/Systrace";
 export { default as ToastAndroid } from "./Libraries/Components/ToastAndroid/ToastAndroid";
 export * as TurboModuleRegistry from "./Libraries/TurboModule/TurboModuleRegistry";

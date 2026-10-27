@@ -225,6 +225,32 @@ function findLibrariesFromReactNativeConfig(
   });
 }
 
+// Reads the `name` declared by the package a dependency resolves to, which is not necessarily the
+// name it is installed under: an alias installs a package under any name the app picks.
+function readPackageNameOf(
+  dependency /*: string */,
+  projectRoot /*: string */,
+) /*: ?string */ {
+  let packageJsonPath;
+  try {
+    packageJsonPath = require.resolve(path.join(dependency, 'package.json'), {
+      paths: [projectRoot],
+    });
+  } catch {
+    packageJsonPath = path.join(
+      projectRoot,
+      'node_modules',
+      dependency,
+      'package.json',
+    );
+  }
+  try {
+    return JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).name;
+  } catch {
+    return null;
+  }
+}
+
 function findExternalLibraries(
   pkgJson /*: $FlowFixMe */,
   projectRoot /*: string */,
@@ -239,8 +265,45 @@ function findExternalLibraries(
     'Searching for codegen-enabled libraries in the project dependencies.',
     true,
   );
+  // This package IS React Native. An out-of-tree platform requires it to be installed alongside
+  // upstream `react-native` — the app still builds iOS and Android from that one — and both declare
+  // the same turbo modules (AccessibilityManager, Appearance, AppState, DeviceInfo,
+  // PlatformConstants, StatusBarManager). Library identity below is the *package* name, so the two
+  // read as different libraries claiming the same modules and the conflict check rejects the pair,
+  // killing `pod install`.
+  //
+  // Upstream's copy is skipped: for this build, React Native is this package. Skipping the scan
+  // altogether would also silence the conflict, and was tried — it loses this package's own
+  // visionOS-only codegen library (FBReactNativeSpec_visionOS), and the build then fails much later
+  // on a missing generated header.
+  //
+  // An app may also install this package *as* `react-native`, through a dependency alias. There is
+  // then no upstream copy to skip: the `react-native` entry resolves to this very package, and
+  // skipping it drops the visionOS library just the same. So the entry is compared by the name in
+  // the package.json it resolves to, not by the name it is installed under.
+  const selfPkgName = JSON.parse(
+    fs.readFileSync(
+      path.join(__dirname, '..', '..', '..', 'package.json'),
+      'utf8',
+    ),
+  ).name;
+  const resolvedReactNativeName = readPackageNameOf(
+    'react-native',
+    projectRoot,
+  );
+  const skipUpstreamReactNative =
+    selfPkgName !== 'react-native' &&
+    dependencies['react-native'] != null &&
+    resolvedReactNativeName !== selfPkgName;
+
   // Handle third-party libraries
   return Object.keys(dependencies).flatMap(dependency => {
+    if (skipUpstreamReactNative && dependency === 'react-native') {
+      codegenLog(
+        `Skipping upstream react-native: ${selfPkgName} is React Native for this build.`,
+      );
+      return [];
+    }
     let configFilePath = '';
     try {
       configFilePath = require.resolve(path.join(dependency, 'package.json'), {

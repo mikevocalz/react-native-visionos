@@ -736,6 +736,7 @@ class ReactNativePodsUtils
             "glog",
             "hermes-engine",
             "React-hermes",
+            "React-RCTXR", # visionOS
         ]
         if ENV['USE_THIRD_PARTY_JSC'] != '1'
             pods << "React-jsc"

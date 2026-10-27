@@ -7,6 +7,7 @@
 
 #import "RCTUtils.h"
 
+#import <atomic>
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 #import <objc/message.h>
@@ -379,12 +380,49 @@ CGFloat RCTFontSizeMultiplier(void)
 #if !TARGET_OS_TV
 UIDeviceOrientation RCTDeviceOrientation(void)
 {
+#if TARGET_OS_VISION
+  return UIDeviceOrientationPortrait;
+#else
   return [[UIDevice currentDevice] orientation];
+#endif
+}
+#endif
+
+#if TARGET_OS_VISION
+/**
+ * visionOS has no device screen, and the app's window is resized by the user at
+ * any time, so the size cannot be cached for the lifetime of the process the way
+ * it is on iOS. `RCTKeyWindow()` may only be read on the main queue, so refresh
+ * the value whenever we are already there and serve the last known size to the
+ * other queues. Until a window exists there is nothing to report.
+ */
+static CGSize RCTVisionWindowSize(void)
+{
+  static std::atomic<CGSize> lastKnownSize{CGSizeZero};
+
+  if (RCTIsMainQueue()) {
+    CGSize windowSize = RCTKeyWindow().bounds.size;
+    if (!CGSizeEqualToSize(windowSize, CGSizeZero)) {
+      lastKnownSize.store(windowSize, std::memory_order_relaxed);
+    }
+  } else if (CGSizeEqualToSize(lastKnownSize.load(std::memory_order_relaxed), CGSizeZero)) {
+    RCTUnsafeExecuteOnMainQueueSync(^{
+      CGSize windowSize = RCTKeyWindow().bounds.size;
+      if (!CGSizeEqualToSize(windowSize, CGSizeZero)) {
+        lastKnownSize.store(windowSize, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  return lastKnownSize.load(std::memory_order_relaxed);
 }
 #endif
 
 CGSize RCTScreenSize(void)
 {
+#if TARGET_OS_VISION
+  return RCTVisionWindowSize();
+#else
   static std::atomic<CGSize> cachedSize;
   __block CGSize size = cachedSize.load(std::memory_order_relaxed);
 
@@ -410,6 +448,7 @@ CGSize RCTScreenSize(void)
   // tvOS doesn't have device orientation, always return landscape size
   return CGSizeMake(size.height, size.width);
 #endif
+#endif // TARGET_OS_VISION
 }
 
 CGSize RCTViewportSize(void)
@@ -613,7 +652,17 @@ UIWindow *__nullable RCTKeyWindow(void)
   if (RCTRunningInAppExtension()) {
     return nil;
   }
-
+  
+  id<UIApplicationDelegate> delegate = RCTSharedApplication().delegate;
+  
+  SEL lastFocusedWindowSelector = NSSelectorFromString(@"lastFocusedWindow");
+  if ([delegate respondsToSelector:lastFocusedWindowSelector]) {
+    UIWindow *lastFocusedWindow = [delegate performSelector:lastFocusedWindowSelector];
+    if (lastFocusedWindow) {
+      return lastFocusedWindow;
+    }
+  }
+  
   NSSet<UIScene *> *connectedScenes = RCTSharedApplication().connectedScenes;
 
   UIScene *foregroundActiveScene;
@@ -623,6 +672,14 @@ UIWindow *__nullable RCTKeyWindow(void)
     if (![scene isKindOfClass:[UIWindowScene class]]) {
       continue;
     }
+
+    #if TARGET_OS_VISION
+    /// Presenting scenes over Immersive Spaces leads to crash: "Presentations are not permitted within volumetric window scenes."
+    if (scene.session.role == UISceneSessionRoleImmersiveSpaceApplication) {
+      continue;
+    }
+    
+#endif
 
     if (scene.activationState == UISceneActivationStateForegroundActive) {
       foregroundActiveScene = scene;
@@ -636,6 +693,22 @@ UIWindow *__nullable RCTKeyWindow(void)
   }
 
   UIScene *sceneToUse = foregroundActiveScene ? foregroundActiveScene : foregroundInactiveScene;
+
+#if TARGET_OS_VISION
+  // Ornaments are supported only on visionOS. Clicking an ornament makes it the
+  // key window, and presenting a RN modal from an ornament crashes, so skip them.
+  if ([sceneToUse isKindOfClass:[UIWindowScene class]]) {
+    UIWindowScene *visionScene = (UIWindowScene *)sceneToUse;
+    UIWindow *visionKeyWindow = visionScene.keyWindow;
+    if ([visionKeyWindow.debugDescription containsString:@"Ornament"]) {
+      for (UIWindow *window in visionScene.windows) {
+        if (window != visionKeyWindow && ![window.debugDescription containsString:@"Ornament"]) {
+          return window;
+        }
+      }
+    }
+  }
+#endif
 
   if ([sceneToUse respondsToSelector:@selector(keyWindow)]) {
     // We have apps internally that might use UIScenes which are not window scenes.

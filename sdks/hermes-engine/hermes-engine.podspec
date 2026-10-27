@@ -166,7 +166,8 @@ Pod::Spec.new do |spec|
           :name => '[RN] [2] Build Hermes',
           :input_files => ["#{hermesc_path}/ImportHostCompilers.cmake"],
           :output_files => [
-            "${PODS_ROOT}/hermes-engine/build/iphonesimulator/API/hermes/hermesvm.framework/hermesvm"
+            "${PODS_ROOT}/hermes-engine/build/iphonesimulator/API/hermes/hermesvm.framework/hermesvm",
+            "${PODS_ROOT}/hermes-engine/build/xrsimulator/API/hermes/hermesvm.framework/hermesvm",
           ],
           :script => <<-EOS
           . "${REACT_NATIVE_PATH}/scripts/xcode/with-environment.sh"
