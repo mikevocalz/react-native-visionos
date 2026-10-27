@@ -143,7 +143,7 @@ RCT_EXPORT_MODULE()
   if (initialURL == nil) {
     initialURL = url;
   } else {
-    postNotificationWithURL(url, self);
+    [RCTLinkingManager postNotificationWithURL:url];
   }
 }
 
