@@ -11,8 +11,8 @@ require 'pathname'
 # React Native 0.88 builds Swift packages such as Nitro V1 modules through `react-native spm`,
 # which needs prebuilt React xcframeworks. None are published for visionOS, so this platform keeps
 # building React Native from source with CocoaPods. A library whose package.json declares
-# `swiftpmConfig` ships only a metadata podspec, so autolinking skips it (see autolinking.rb) and
-# this step links it as a local Swift package instead:
+# `swiftpmConfig` and ships only a metadata podspec is skipped by autolinking (see autolinking.rb)
+# and linked here as a local Swift package instead:
 #
 # 1. scripts/spm/cocoapods-hybrid.js lays out the same tree `react-native spm` would:
 #    build/generated/autolinking/libs/<SwiftName> for every library, and build/xcframeworks as the
@@ -25,6 +25,13 @@ require 'pathname'
 module SwiftPMHybrid
   PRODUCT_NAME = 'Autolinked'.freeze
 
+  SOURCE_ATTRIBUTES = %w[
+    source_files vendored_frameworks vendored_libraries resources resource_bundles
+  ].freeze
+  PLATFORM_KEYS = %w[ios osx tvos visionos watchos].freeze
+
+  @roots = []
+
   def self.swiftpm_package?(root)
     return false if root.nil? || root.to_s.empty?
 
@@ -36,11 +43,35 @@ module SwiftPMHybrid
     false
   end
 
+  # True when the podspec, its subspecs and their per-platform sections declare nothing to build.
+  def self.metadata_only?(spec)
+    present = ->(value) { !value.nil? && !(value.respond_to?(:empty?) && value.empty?) }
+    ([spec] + spec.recursive_subspecs).all? do |s|
+      hash = s.attributes_hash
+      sections = [hash] + PLATFORM_KEYS.map { |p| hash[p] }.select { |h| h.is_a?(Hash) }
+      sections.none? { |section| SOURCE_ATTRIBUTES.any? { |key| present.call(section[key]) } }
+    end
+  end
+
+  def self.swiftpm_only?(root, spec)
+    swiftpm_package?(root) && metadata_only?(spec)
+  end
+
+  def self.register(root)
+    @roots << root.to_s unless @roots.include?(root.to_s)
+  end
+
+  def self.roots
+    @roots.dup
+  end
+
   def self.apply(installer, react_native_path)
     installation_root = Pod::Config.instance.installation_root.to_s
     rn_root = File.expand_path(react_native_path, installation_root)
     script = File.join(rn_root, 'scripts', 'spm', 'cocoapods-hybrid.js')
-    Pod::UI.puts Pod::Executable.execute_command('node', [script, '--project-root', installation_root], true)
+    args = [script, '--project-root', installation_root]
+    roots.each { |root| args.push('--package-root', root) }
+    Pod::UI.puts Pod::Executable.execute_command('node', args, true)
 
     result_path = File.join(installation_root, 'build', 'generated', 'autolinking', 'swiftpm-hybrid.json')
     result = JSON.parse(File.read(result_path))

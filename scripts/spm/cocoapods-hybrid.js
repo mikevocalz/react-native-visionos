@@ -49,11 +49,23 @@ const SHIM_SOURCE =
   'int react_native_cocoapods_hybrid_headers_shim;\n';
 
 function parseArgs(argv) {
-  const index = argv.indexOf('--project-root');
-  if (index === -1 || argv[index + 1] == null) {
-    throw new Error('usage: cocoapods-hybrid.js --project-root <dir>');
+  let projectRoot = null;
+  const packageRoots = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--project-root' && argv[i + 1] != null) {
+      projectRoot = path.resolve(argv[++i]);
+    } else if (argv[i] === '--package-root' && argv[i + 1] != null) {
+      packageRoots.push(path.resolve(argv[++i]));
+    } else {
+      throw new Error(`unexpected argument ${argv[i]}`);
+    }
   }
-  return {projectRoot: path.resolve(argv[index + 1])};
+  if (projectRoot == null) {
+    throw new Error(
+      'usage: cocoapods-hybrid.js --project-root <dir> [--package-root <dir>]...',
+    );
+  }
+  return {projectRoot, packageRoots};
 }
 
 function readJson(file) {
@@ -81,18 +93,13 @@ function swiftpmConfigOf(root) {
 }
 
 /**
- * Autolinked dependencies that declare swiftpmConfig, plus the libraries they
- * name in swiftpmConfig.dependencies (resolved from the depending package, the
- * way Node would), transitively.
+ * The libraries autolinking left to SwiftPM (passed in by swiftpm_hybrid.rb),
+ * plus the libraries they name in swiftpmConfig.dependencies (resolved from the
+ * depending package, the way Node would), transitively.
  */
-function collectLibraries(autolinkingJson) {
+function collectLibraries(packageRoots) {
   const byRoot = new Map();
-  const queue = [];
-  for (const dep of Object.values(autolinkingJson.dependencies ?? {})) {
-    if (dep?.root != null && dep.platforms?.ios != null) {
-      queue.push(fs.realpathSync(dep.root));
-    }
-  }
+  const queue = packageRoots.map(root => fs.realpathSync(root));
   while (queue.length > 0) {
     const root = queue.shift();
     if (byRoot.has(root)) {
@@ -364,10 +371,9 @@ ${products}
 }
 
 function main() {
-  const {projectRoot} = parseArgs(process.argv.slice(2));
+  const {projectRoot, packageRoots} = parseArgs(process.argv.slice(2));
   const autolinkingDir = path.join(projectRoot, 'build', 'generated', 'autolinking');
-  const autolinkingJson = readJson(path.join(autolinkingDir, 'autolinking.json'));
-  const libraries = collectLibraries(autolinkingJson);
+  const libraries = collectLibraries(packageRoots);
   const libsDir = path.join(autolinkingDir, 'libs');
   const packageDir = path.join(autolinkingDir, 'Autolinked');
   const resultFile = path.join(autolinkingDir, 'swiftpm-hybrid.json');

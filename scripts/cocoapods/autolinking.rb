@@ -178,12 +178,14 @@ def link_native_modules!(config)
 
     relative_path = podspec_dir_path.relative_path_from ios_project_root
 
-    # Nitro V1 libraries (and any other package that declares `swiftpmConfig`) build through
-    # their Package.swift. Their podspec only carries metadata for CLI discovery, has no sources,
-    # and CocoaPods rejects it as empty. They are linked as Swift packages after the install by
-    # `link_swiftpm_packages!` (scripts/cocoapods/swiftpm_hybrid.rb) instead.
-    if SwiftPMHybrid.swiftpm_package?(package[:root])
-      Pod::UI.puts "Linking #{spec.name} through SwiftPM (its package.json declares swiftpmConfig)"
+    # Nitro V1 libraries build only through their Package.swift: package.json declares
+    # `swiftpmConfig` and the podspec carries metadata for CLI discovery, with no sources, so
+    # CocoaPods rejects it as empty. SwiftPMHybrid links them as Swift packages after the install
+    # (scripts/cocoapods/swiftpm_hybrid.rb). A library that also ships a podspec with sources
+    # keeps building through CocoaPods.
+    if SwiftPMHybrid.swiftpm_only?(package[:root], spec)
+      Pod::UI.puts "Linking #{spec.name} through SwiftPM (swiftpmConfig, metadata-only podspec)"
+      SwiftPMHybrid.register(package[:root])
       next
     end
 
